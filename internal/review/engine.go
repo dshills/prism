@@ -121,9 +121,9 @@ func Run(ctx context.Context, diff gitctx.DiffResult, cfg config.Config) (*Repor
 			}
 		}
 
-		// Store in cache (the raw JSON response for the findings)
-		if findingsJSON, jerr := json.Marshal(findings); jerr == nil {
-			_ = reviewCache.Put(cacheKey, string(findingsJSON))
+		// Store in cache as rawFinding format so parseFindings can read it back
+		if rawJSON, jerr := json.Marshal(findingsToRaw(findings)); jerr == nil {
+			_ = reviewCache.Put(cacheKey, string(rawJSON))
 		}
 	}
 
@@ -213,6 +213,29 @@ func parseFindings(content string) ([]Finding, error) {
 	}
 
 	return findings, nil
+}
+
+// findingsToRaw converts parsed Findings back to rawFinding format for cache storage.
+func findingsToRaw(findings []Finding) []rawFinding {
+	raw := make([]rawFinding, len(findings))
+	for i, f := range findings {
+		r := rawFinding{
+			Severity:   string(f.Severity),
+			Category:   string(f.Category),
+			Title:      f.Title,
+			Message:    f.Message,
+			Suggestion: f.Suggestion,
+			Confidence: f.Confidence,
+			Tags:       f.Tags,
+		}
+		if len(f.Locations) > 0 {
+			r.Path = f.Locations[0].Path
+			r.StartLine = f.Locations[0].Lines.Start
+			r.EndLine = f.Locations[0].Lines.End
+		}
+		raw[i] = r
+	}
+	return raw
 }
 
 func generateFindingID(f Finding) string {
