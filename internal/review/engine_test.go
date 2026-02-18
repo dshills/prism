@@ -173,6 +173,83 @@ func TestGenerateRunID(t *testing.T) {
 	}
 }
 
+func TestBuildReport(t *testing.T) {
+	diff := gitctx.DiffResult{
+		Mode:  "staged",
+		Range: "abc..def",
+		Repo: gitctx.RepoMeta{
+			Root:   "/repo",
+			Head:   "abc123",
+			Branch: "main",
+		},
+	}
+	findings := []Finding{
+		{
+			ID:       "f1",
+			Severity: SeverityHigh,
+			Category: CategoryBug,
+			Title:    "Bug found",
+			Message:  "There is a bug",
+		},
+		{
+			ID:       "f2",
+			Severity: SeverityLow,
+			Category: CategoryStyle,
+			Title:    "Style issue",
+			Message:  "Naming could be better",
+		},
+	}
+
+	r := BuildReport(diff, findings, 500, 1000)
+
+	if r.Tool != "prism" {
+		t.Errorf("Tool = %q, want %q", r.Tool, "prism")
+	}
+	if r.Version != "1.0" {
+		t.Errorf("Version = %q, want %q", r.Version, "1.0")
+	}
+	if r.RunID == "" {
+		t.Error("RunID should not be empty")
+	}
+	if r.Repo.Root != "/repo" {
+		t.Errorf("Repo.Root = %q, want %q", r.Repo.Root, "/repo")
+	}
+	if r.Repo.Head != "abc123" {
+		t.Errorf("Repo.Head = %q, want %q", r.Repo.Head, "abc123")
+	}
+	if r.Repo.Branch != "main" {
+		t.Errorf("Repo.Branch = %q, want %q", r.Repo.Branch, "main")
+	}
+	if r.Inputs.Mode != "staged" {
+		t.Errorf("Inputs.Mode = %q, want %q", r.Inputs.Mode, "staged")
+	}
+	if r.Inputs.Range != "abc..def" {
+		t.Errorf("Inputs.Range = %q, want %q", r.Inputs.Range, "abc..def")
+	}
+	if len(r.Findings) != 2 {
+		t.Fatalf("Findings count = %d, want 2", len(r.Findings))
+	}
+	if r.Findings[0].Title != "Bug found" {
+		t.Errorf("Findings[0].Title = %q", r.Findings[0].Title)
+	}
+	if r.Timing.LLMMs != 500 {
+		t.Errorf("Timing.LLMMs = %d, want 500", r.Timing.LLMMs)
+	}
+	if r.Timing.TotalMs != 1000 {
+		t.Errorf("Timing.TotalMs = %d, want 1000", r.Timing.TotalMs)
+	}
+	// Summary should reflect findings
+	if r.Summary.Counts.High != 1 {
+		t.Errorf("Summary.Counts.High = %d, want 1", r.Summary.Counts.High)
+	}
+	if r.Summary.Counts.Low != 1 {
+		t.Errorf("Summary.Counts.Low = %d, want 1", r.Summary.Counts.Low)
+	}
+	if r.Summary.HighestSeverity != SeverityHigh {
+		t.Errorf("Summary.HighestSeverity = %q, want %q", r.Summary.HighestSeverity, SeverityHigh)
+	}
+}
+
 func TestEmptyReport(t *testing.T) {
 	diff := gitctx.DiffResult{
 		Mode: "staged",

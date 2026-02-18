@@ -129,7 +129,7 @@ func runReview(diff gitctx.DiffResult, cfg config.Config) {
 	var err error
 
 	if len(compareModels) >= 2 {
-		report, err = runCompareMode(ctx, diff, cfg, compareModels)
+		report, err = runCompareMode(ctx, diff, cfg, compareModels, nil)
 	} else {
 		report, err = review.Run(ctx, diff, cfg)
 	}
@@ -162,7 +162,7 @@ func runReview(diff gitctx.DiffResult, cfg config.Config) {
 	}
 }
 
-func runCompareMode(ctx context.Context, diff gitctx.DiffResult, cfg config.Config, models []string) (*review.Report, error) {
+func runCompareMode(ctx context.Context, diff gitctx.DiffResult, cfg config.Config, models []string, builder review.PromptBuilder) (*review.Report, error) {
 	startTime := time.Now()
 
 	rules, err := review.LoadRules(cfg.RulesFile)
@@ -170,7 +170,9 @@ func runCompareMode(ctx context.Context, diff gitctx.DiffResult, cfg config.Conf
 		return nil, fmt.Errorf("loading rules: %w", err)
 	}
 
-	cr, err := review.RunCompare(ctx, diff.Diff, diff.Files, models, cfg, rules)
+	cr, err := review.RunCompareWithOptions(ctx, diff.Diff, diff.Files, models, cfg, rules, review.CompareOptions{
+		Builder: builder,
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -180,28 +182,7 @@ func runCompareMode(ctx context.Context, diff gitctx.DiffResult, cfg config.Conf
 		findings = findings[:cfg.MaxFindings]
 	}
 
-	totalMs := time.Since(startTime).Milliseconds()
-
-	report := &review.Report{
-		Tool:    "prism",
-		Version: "1.0",
-		RunID:   review.GenerateRunID(),
-		Repo: review.RepoInfo{
-			Root:   diff.Repo.Root,
-			Head:   diff.Repo.Head,
-			Branch: diff.Repo.Branch,
-		},
-		Inputs: review.InputInfo{
-			Mode:  diff.Mode,
-			Range: diff.Range,
-		},
-		Summary:  review.ComputeSummary(findings),
-		Findings: findings,
-		Timing: review.Timing{
-			LLMMs:   cr.LLMMs,
-			TotalMs: totalMs,
-		},
-	}
+	report := review.BuildReport(diff, findings, cr.LLMMs, time.Since(startTime).Milliseconds())
 
 	// Print compare summary to stderr
 	fmt.Fprintf(os.Stderr, "Compare mode: %d models, %d consensus findings, %d total\n",
@@ -395,7 +376,11 @@ func runCodebaseReview(diff gitctx.DiffResult, cfg config.Config) {
 	var err error
 
 	if len(compareModels) >= 2 {
-		report, err = runCodebaseCompareMode(ctx, diff, cfg, compareModels)
+		maxPerFile := flagMaxFindingsPerFile
+		codebaseBuilder := func(chunkDiff string, files []string, c config.Config, r *review.Rules) (string, string) {
+			return review.CodebaseSystemPrompt(), review.BuildCodebaseUserPrompt(chunkDiff, files, c.MaxFindings, maxPerFile, c.FailOn, r)
+		}
+		report, err = runCompareMode(ctx, diff, cfg, compareModels, codebaseBuilder)
 	} else {
 		cbCfg := review.CodebaseConfig{
 			Config:             cfg,
@@ -429,65 +414,6 @@ func runCodebaseReview(diff gitctx.DiffResult, cfg config.Config) {
 			}
 		}
 	}
-}
-
-func runCodebaseCompareMode(ctx context.Context, diff gitctx.DiffResult, cfg config.Config, models []string) (*review.Report, error) {
-	startTime := time.Now()
-
-	rules, err := review.LoadRules(cfg.RulesFile)
-	if err != nil {
-		return nil, fmt.Errorf("loading rules: %w", err)
-	}
-
-	maxPerFile := flagMaxFindingsPerFile
-	codebaseBuilder := func(chunkDiff string, files []string, c config.Config, r *review.Rules) (string, string) {
-		return review.CodebaseSystemPrompt(), review.BuildCodebaseUserPrompt(chunkDiff, files, c.MaxFindings, maxPerFile, c.FailOn, r)
-	}
-
-	cr, err := review.RunCompareWithOptions(ctx, diff.Diff, diff.Files, models, cfg, rules, review.CompareOptions{
-		Builder: codebaseBuilder,
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	findings := cr.All
-	if cfg.MaxFindings > 0 && len(findings) > cfg.MaxFindings {
-		findings = findings[:cfg.MaxFindings]
-	}
-
-	totalMs := time.Since(startTime).Milliseconds()
-
-	report := &review.Report{
-		Tool:    "prism",
-		Version: "1.0",
-		RunID:   review.GenerateRunID(),
-		Repo: review.RepoInfo{
-			Root:   diff.Repo.Root,
-			Head:   diff.Repo.Head,
-			Branch: diff.Repo.Branch,
-		},
-		Inputs: review.InputInfo{
-			Mode:  diff.Mode,
-			Range: diff.Range,
-		},
-		Summary:  review.ComputeSummary(findings),
-		Findings: findings,
-		Timing: review.Timing{
-			LLMMs:   cr.LLMMs,
-			TotalMs: totalMs,
-		},
-	}
-
-	fmt.Fprintf(os.Stderr, "Compare mode: %d models, %d consensus findings, %d total\n",
-		len(models), len(cr.Consensus), len(cr.All))
-	for label, unique := range cr.Unique {
-		if len(unique) > 0 {
-			fmt.Fprintf(os.Stderr, "  %s: %d unique findings\n", label, len(unique))
-		}
-	}
-
-	return report, nil
 }
 
 func init() {

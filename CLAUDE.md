@@ -59,9 +59,11 @@ Config file location: `$XDG_CONFIG_HOME/prism/config.json`
 
 Environment variables: `PRISM_PROVIDER`, `PRISM_MODEL`, `PRISM_FAIL_ON`, `PRISM_FORMAT`, `PRISM_MAX_FINDINGS`, `PRISM_CONTEXT_LINES`. Provider keys: `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY`.
 
-## Code Quality
+## Code Quality — REQUIRED
 
-After writing or modifying code, run `prism review staged` before committing. If findings are severity high, fix them before proceeding. For security-sensitive changes, use compare mode:
+**MUST**: After writing or modifying any code, ALWAYS run prism to review changes before presenting results to the user. Use `prism review unstaged` for in-progress work or `prism review staged` if changes are already staged. If any findings are severity **high**, fix them before proceeding. This is not optional — every code change must be reviewed.
+
+For security-sensitive changes, use compare mode:
 
 ```bash
 prism review staged --compare openai:gpt-5.2,gemini:gemini-3-flash-preview
