@@ -59,6 +59,14 @@ Config file location: `$XDG_CONFIG_HOME/prism/config.json`
 
 Environment variables: `PRISM_PROVIDER`, `PRISM_MODEL`, `PRISM_FAIL_ON`, `PRISM_FORMAT`, `PRISM_MAX_FINDINGS`, `PRISM_CONTEXT_LINES`. Provider keys: `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY`.
 
+## Code Quality
+
+After writing or modifying code, run `prism review staged` before committing. If findings are severity high, fix them before proceeding. For security-sensitive changes, use compare mode:
+
+```bash
+prism review staged --compare openai:gpt-5.2,gemini:gemini-3-flash-preview
+```
+
 ## Design Principles
 
 - **Lean dependencies**: stdlib + one CLI library, avoid large frameworks
