@@ -84,6 +84,11 @@ func NeedsChunking(diff string) bool {
 
 // RunChunked reviews diff chunks in parallel and merges findings.
 func RunChunked(ctx context.Context, chunks []Chunk, provider providers.Reviewer, cfg config.Config) ([]Finding, int64, error) {
+	return RunChunkedWithRules(ctx, chunks, provider, cfg, nil)
+}
+
+// RunChunkedWithRules reviews diff chunks in parallel with optional rules.
+func RunChunkedWithRules(ctx context.Context, chunks []Chunk, provider providers.Reviewer, cfg config.Config, rules *Rules) ([]Finding, int64, error) {
 	type result struct {
 		index    int
 		findings []Finding
@@ -103,7 +108,7 @@ func RunChunked(ctx context.Context, chunks []Chunk, provider providers.Reviewer
 			sem <- struct{}{}        // acquire
 			defer func() { <-sem }() // release
 
-			userPrompt := BuildUserPrompt(chunk.Diff, chunk.Files, cfg.MaxFindings, cfg.FailOn)
+			userPrompt := BuildUserPromptWithRules(chunk.Diff, chunk.Files, cfg.MaxFindings, cfg.FailOn, rules)
 			req := providers.ReviewRequest{
 				SystemPrompt: SystemPrompt(),
 				UserPrompt:   userPrompt,

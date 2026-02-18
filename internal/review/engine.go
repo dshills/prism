@@ -64,6 +64,12 @@ func Run(ctx context.Context, diff gitctx.DiffResult, cfg config.Config) (*Repor
 		}
 	}
 
+	// Load rules
+	rules, err := LoadRules(cfg.RulesFile)
+	if err != nil {
+		return nil, fmt.Errorf("loading rules: %w", err)
+	}
+
 	if findings == nil {
 		provider, err := providers.New(cfg.Provider, cfg.Model)
 		if err != nil {
@@ -73,12 +79,12 @@ func Run(ctx context.Context, diff gitctx.DiffResult, cfg config.Config) (*Repor
 		// Use chunked review for large diffs
 		if NeedsChunking(redactedDiff) {
 			chunks := SplitIntoChunks(redactedDiff, cfg.MaxDiffBytes)
-			findings, llmMs, err = RunChunked(ctx, chunks, provider, cfg)
+			findings, llmMs, err = RunChunkedWithRules(ctx, chunks, provider, cfg, rules)
 			if err != nil {
 				return nil, fmt.Errorf("chunked review: %w", err)
 			}
 		} else {
-			userPrompt := BuildUserPrompt(redactedDiff, diff.Files, cfg.MaxFindings, cfg.FailOn)
+			userPrompt := BuildUserPromptWithRules(redactedDiff, diff.Files, cfg.MaxFindings, cfg.FailOn, rules)
 
 			llmStart := time.Now()
 			req := providers.ReviewRequest{
@@ -122,6 +128,9 @@ func Run(ctx context.Context, diff gitctx.DiffResult, cfg config.Config) (*Repor
 		}
 	}
 
+	// Apply rules severity overrides
+	findings = ApplySeverityOverrides(findings, rules)
+
 	// Limit findings
 	if cfg.MaxFindings > 0 && len(findings) > cfg.MaxFindings {
 		findings = findings[:cfg.MaxFindings]
@@ -132,7 +141,7 @@ func Run(ctx context.Context, diff gitctx.DiffResult, cfg config.Config) (*Repor
 	report := &Report{
 		Tool:    "prism",
 		Version: "1.0",
-		RunID:   generateRunID(),
+		RunID:   GenerateRunID(),
 		Repo: RepoInfo{
 			Root:   diff.Repo.Root,
 			Head:   diff.Repo.Head,
@@ -218,7 +227,8 @@ func generateFindingID(f Finding) string {
 	return fmt.Sprintf("%x", h[:8])
 }
 
-func generateRunID() string {
+// GenerateRunID creates a unique run identifier.
+func GenerateRunID() string {
 	h := sha256.Sum256([]byte(fmt.Sprintf("%d", time.Now().UnixNano())))
 	return fmt.Sprintf("%x", h[:16])
 }
@@ -227,7 +237,7 @@ func emptyReport(diff gitctx.DiffResult, gitMs int64, startTime time.Time) *Repo
 	return &Report{
 		Tool:    "prism",
 		Version: "1.0",
-		RunID:   generateRunID(),
+		RunID:   GenerateRunID(),
 		Repo: RepoInfo{
 			Root:   diff.Repo.Root,
 			Head:   diff.Repo.Head,

@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/dshills/prism/internal/config"
 	"github.com/dshills/prism/internal/gitctx"
@@ -23,6 +24,7 @@ var (
 	flagMaxDiffBytes int
 	flagProvider     string
 	flagModel        string
+	flagCompare      string
 	flagFormat       string
 	flagOut          string
 	flagFailOn       string
@@ -38,7 +40,8 @@ func addReviewFlags(cmd *cobra.Command) {
 	cmd.Flags().IntVar(&flagMaxDiffBytes, "max-diff-bytes", 0, "Maximum diff size in bytes")
 	cmd.Flags().StringVar(&flagProvider, "provider", "", "LLM provider (anthropic, openai, gemini)")
 	cmd.Flags().StringVar(&flagModel, "model", "", "Model name")
-	cmd.Flags().StringVar(&flagFormat, "format", "", "Output format (text, json, sarif)")
+	cmd.Flags().StringVar(&flagCompare, "compare", "", "Compare mode: comma-separated provider:model pairs")
+	cmd.Flags().StringVar(&flagFormat, "format", "", "Output format (text, json, markdown, sarif)")
 	cmd.Flags().StringVar(&flagOut, "out", "", "Output file path (default: stdout)")
 	cmd.Flags().StringVar(&flagFailOn, "fail-on", "", "Fail on severity threshold (none, low, medium, high)")
 	cmd.Flags().IntVar(&flagMaxFindings, "max-findings", 0, "Maximum number of findings")
@@ -109,8 +112,25 @@ func runReview(diff gitctx.DiffResult, cfg config.Config) {
 		fmt.Fprintln(os.Stderr, "WARNING: secret redaction is disabled")
 	}
 
+	// Determine compare models from flag or config
+	var compareModels []string
+	if flagCompare != "" {
+		compareModels = splitComma(flagCompare)
+	} else if len(cfg.Compare) > 0 {
+		compareModels = cfg.Compare
+	}
+
 	ctx := context.Background()
-	report, err := review.Run(ctx, diff, cfg)
+
+	var report *review.Report
+	var err error
+
+	if len(compareModels) >= 2 {
+		report, err = runCompareMode(ctx, diff, cfg, compareModels)
+	} else {
+		report, err = review.Run(ctx, diff, cfg)
+	}
+
 	if err != nil {
 		if providers.IsAuthError(err) {
 			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
@@ -137,6 +157,59 @@ func runReview(diff gitctx.DiffResult, cfg config.Config) {
 			}
 		}
 	}
+}
+
+func runCompareMode(ctx context.Context, diff gitctx.DiffResult, cfg config.Config, models []string) (*review.Report, error) {
+	startTime := time.Now()
+
+	rules, err := review.LoadRules(cfg.RulesFile)
+	if err != nil {
+		return nil, fmt.Errorf("loading rules: %w", err)
+	}
+
+	cr, err := review.RunCompare(ctx, diff.Diff, diff.Files, models, cfg, rules)
+	if err != nil {
+		return nil, err
+	}
+
+	findings := cr.All
+	if cfg.MaxFindings > 0 && len(findings) > cfg.MaxFindings {
+		findings = findings[:cfg.MaxFindings]
+	}
+
+	totalMs := time.Since(startTime).Milliseconds()
+
+	report := &review.Report{
+		Tool:    "prism",
+		Version: "1.0",
+		RunID:   review.GenerateRunID(),
+		Repo: review.RepoInfo{
+			Root:   diff.Repo.Root,
+			Head:   diff.Repo.Head,
+			Branch: diff.Repo.Branch,
+		},
+		Inputs: review.InputInfo{
+			Mode:  diff.Mode,
+			Range: diff.Range,
+		},
+		Summary:  review.ComputeSummary(findings),
+		Findings: findings,
+		Timing: review.Timing{
+			LLMMs:   cr.LLMMs,
+			TotalMs: totalMs,
+		},
+	}
+
+	// Print compare summary to stderr
+	fmt.Fprintf(os.Stderr, "Compare mode: %d models, %d consensus findings, %d total\n",
+		len(models), len(cr.Consensus), len(cr.All))
+	for label, unique := range cr.Unique {
+		if len(unique) > 0 {
+			fmt.Fprintf(os.Stderr, "  %s: %d unique findings\n", label, len(unique))
+		}
+	}
+
+	return report, nil
 }
 
 var reviewCmd = &cobra.Command{

@@ -36,6 +36,11 @@ If there are no issues, respond with an empty array: []`
 
 // BuildUserPrompt constructs the user prompt from diff content and options.
 func BuildUserPrompt(diff string, files []string, maxFindings int, failOn string) string {
+	return BuildUserPromptWithRules(diff, files, maxFindings, failOn, nil)
+}
+
+// BuildUserPromptWithRules constructs the user prompt with optional rules.
+func BuildUserPromptWithRules(diff string, files []string, maxFindings int, failOn string, rules *Rules) string {
 	var b strings.Builder
 
 	b.WriteString("Review the following code diff.\n\n")
@@ -51,6 +56,11 @@ func BuildUserPrompt(diff string, files []string, maxFindings int, failOn string
 	langs := detectLanguages(files)
 	if len(langs) > 0 {
 		fmt.Fprintf(&b, "Languages: %s\n", strings.Join(langs, ", "))
+	}
+
+	// Rules-based instructions
+	if rulesSection := BuildRulesPromptSection(rules); rulesSection != "" {
+		b.WriteString(rulesSection)
 	}
 
 	b.WriteString("\n--- BEGIN DIFF ---\n")
