@@ -192,3 +192,139 @@ func TestBuildCacheKey(t *testing.T) {
 		t.Error("Different provider should produce different cache key")
 	}
 }
+
+func TestCache_GetMissingFile(t *testing.T) {
+	dir := t.TempDir()
+	c, err := New(true, dir, 86400)
+	if err != nil {
+		t.Fatalf("New error: %v", err)
+	}
+	// Get a key that was never Put
+	_, ok := c.Get("nonexistent")
+	if ok {
+		t.Error("Expected cache miss for nonexistent key")
+	}
+}
+
+func TestCache_GetCorruptedJSON(t *testing.T) {
+	dir := t.TempDir()
+	c, err := New(true, dir, 86400)
+	if err != nil {
+		t.Fatalf("New error: %v", err)
+	}
+
+	// Write a corrupted file at the expected path
+	key := "corrupt-test"
+	path := filepath.Join(dir, HashKey(key)+".json")
+	os.WriteFile(path, []byte("not valid json{{{"), 0o644)
+
+	_, ok := c.Get(key)
+	if ok {
+		t.Error("Expected cache miss for corrupted JSON")
+	}
+}
+
+func TestCache_TTLZero(t *testing.T) {
+	dir := t.TempDir()
+	c, err := New(true, dir, 0) // TTL=0 means no expiration
+	if err != nil {
+		t.Fatalf("New error: %v", err)
+	}
+
+	if err := c.Put("key", "value"); err != nil {
+		t.Fatalf("Put error: %v", err)
+	}
+
+	got, ok := c.Get("key")
+	if !ok {
+		t.Error("Expected cache hit with TTL=0 (no expiration)")
+	}
+	if got != "value" {
+		t.Errorf("Got = %q, want %q", got, "value")
+	}
+}
+
+func TestCache_PutDisabled(t *testing.T) {
+	c, _ := New(false, "", 0)
+	if err := c.Put("key", "value"); err != nil {
+		t.Errorf("Put on disabled cache should not error: %v", err)
+	}
+}
+
+func TestCache_Dir(t *testing.T) {
+	dir := t.TempDir()
+	c, err := New(true, dir, 86400)
+	if err != nil {
+		t.Fatalf("New error: %v", err)
+	}
+	if c.Dir() != dir {
+		t.Errorf("Dir() = %q, want %q", c.Dir(), dir)
+	}
+}
+
+func TestCache_DisabledDir(t *testing.T) {
+	c, _ := New(false, "", 0)
+	if c.Dir() != "" {
+		t.Errorf("Dir() on disabled cache should be empty, got %q", c.Dir())
+	}
+}
+
+func TestCache_GetStats_WithExpired(t *testing.T) {
+	dir := t.TempDir()
+	c, err := New(true, dir, 1) // 1 second TTL
+	if err != nil {
+		t.Fatalf("New error: %v", err)
+	}
+
+	c.Put("key1", "val1")
+	time.Sleep(1100 * time.Millisecond) // Wait for expiry
+	c.Put("key2", "val2")              // This one is fresh
+
+	stats, err := c.GetStats()
+	if err != nil {
+		t.Fatalf("GetStats error: %v", err)
+	}
+	if stats.Entries != 2 {
+		t.Errorf("Entries = %d, want 2", stats.Entries)
+	}
+	if stats.Expired != 1 {
+		t.Errorf("Expired = %d, want 1", stats.Expired)
+	}
+}
+
+func TestCache_GetStats_Disabled(t *testing.T) {
+	c, _ := New(false, "", 0)
+	stats, err := c.GetStats()
+	if err != nil {
+		t.Fatalf("GetStats error: %v", err)
+	}
+	if stats.Entries != 0 {
+		t.Errorf("Entries = %d, want 0 for disabled cache", stats.Entries)
+	}
+}
+
+func TestCache_ClearDisabled(t *testing.T) {
+	c, _ := New(false, "", 0)
+	if err := c.Clear(); err != nil {
+		t.Errorf("Clear on disabled cache should not error: %v", err)
+	}
+}
+
+func TestCache_OverwriteExisting(t *testing.T) {
+	dir := t.TempDir()
+	c, err := New(true, dir, 86400)
+	if err != nil {
+		t.Fatalf("New error: %v", err)
+	}
+
+	c.Put("key", "original")
+	c.Put("key", "updated")
+
+	got, ok := c.Get("key")
+	if !ok {
+		t.Fatal("Expected cache hit")
+	}
+	if got != "updated" {
+		t.Errorf("Got = %q, want %q", got, "updated")
+	}
+}

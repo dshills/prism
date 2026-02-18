@@ -2,6 +2,9 @@ package review
 
 import (
 	"testing"
+	"time"
+
+	"github.com/dshills/prism/internal/gitctx"
 )
 
 func TestParseFindings_ValidJSON(t *testing.T) {
@@ -122,5 +125,87 @@ func TestGenerateFindingID_Different(t *testing.T) {
 	}
 	if generateFindingID(f1) == generateFindingID(f2) {
 		t.Error("Different findings should have different IDs")
+	}
+}
+
+func TestGenerateFindingID_NoLocations(t *testing.T) {
+	f := Finding{Title: "No location finding"}
+	id := generateFindingID(f)
+	if id == "" {
+		t.Error("ID should be generated even with no locations")
+	}
+	if len(id) != 16 { // sha256[:8] as hex = 16 chars
+		t.Errorf("ID length = %d, want 16", len(id))
+	}
+}
+
+func TestParseFindings_EmptyCodeFence(t *testing.T) {
+	input := "```\n```"
+	findings, err := parseFindings(input)
+	if err != nil {
+		t.Fatalf("parseFindings with empty code fence error: %v", err)
+	}
+	if len(findings) != 0 {
+		t.Errorf("got %d findings, want 0", len(findings))
+	}
+}
+
+func TestParseFindings_WhitespaceOnly(t *testing.T) {
+	_, err := parseFindings("   \n\t\n  ")
+	if err == nil {
+		t.Error("Expected error for whitespace-only input")
+	}
+}
+
+func TestGenerateRunID(t *testing.T) {
+	id1 := GenerateRunID()
+	if id1 == "" {
+		t.Error("RunID should not be empty")
+	}
+	if len(id1) != 32 { // sha256[:16] as hex = 32 chars
+		t.Errorf("RunID length = %d, want 32", len(id1))
+	}
+
+	time.Sleep(time.Millisecond)
+	id2 := GenerateRunID()
+	if id1 == id2 {
+		t.Error("Two RunIDs generated at different times should differ")
+	}
+}
+
+func TestEmptyReport(t *testing.T) {
+	diff := gitctx.DiffResult{
+		Mode: "staged",
+		Repo: gitctx.RepoMeta{
+			Root:   "/repo",
+			Head:   "abc123",
+			Branch: "main",
+		},
+	}
+	r := emptyReport(diff, time.Now())
+
+	if r.Tool != "prism" {
+		t.Errorf("Tool = %q, want %q", r.Tool, "prism")
+	}
+	if r.Version != "1.0" {
+		t.Errorf("Version = %q, want %q", r.Version, "1.0")
+	}
+	if r.RunID == "" {
+		t.Error("RunID should not be empty")
+	}
+	if r.Repo.Root != "/repo" {
+		t.Errorf("Repo.Root = %q, want %q", r.Repo.Root, "/repo")
+	}
+	if r.Repo.Head != "abc123" {
+		t.Errorf("Repo.Head = %q, want %q", r.Repo.Head, "abc123")
+	}
+	if r.Repo.Branch != "main" {
+		t.Errorf("Repo.Branch = %q, want %q", r.Repo.Branch, "main")
+	}
+	if r.Inputs.Mode != "staged" {
+		t.Errorf("Inputs.Mode = %q, want %q", r.Inputs.Mode, "staged")
+	}
+	if len(r.Findings) != 0 {
+		t.Errorf("Findings = %d, want 0", len(r.Findings))
 	}
 }

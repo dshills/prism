@@ -272,6 +272,49 @@ func TestMergeResults_ConsensusAndUnique(t *testing.T) {
 	}
 }
 
+func TestFindingLines_NoLocations(t *testing.T) {
+	f := Finding{Title: "No locations"}
+	lr := findingLines(f)
+	if lr.Start != 0 || lr.End != 0 {
+		t.Errorf("findingLines with no locations should return zero LineRange, got %+v", lr)
+	}
+}
+
+func TestAnyTitleWordOverlap_EmptyTitles(t *testing.T) {
+	if anyTitleWordOverlap("", "hello world") {
+		t.Error("Empty first title should not overlap")
+	}
+	if anyTitleWordOverlap("hello world", "") {
+		t.Error("Empty second title should not overlap")
+	}
+	if anyTitleWordOverlap("", "") {
+		t.Error("Two empty titles should not overlap")
+	}
+}
+
+func TestAnyTitleWordOverlap_Positive(t *testing.T) {
+	if !anyTitleWordOverlap("SQL injection", "SQL vulnerability") {
+		t.Error("Titles sharing 'SQL' should overlap")
+	}
+}
+
+func TestFuzzyMatch_NoLocations(t *testing.T) {
+	a := Finding{Category: CategoryBug, Title: "Bug"}
+	b := Finding{Category: CategoryBug, Title: "Bug"}
+	// Same path (both empty), lines overlap (both 0-0), same category, shared words
+	if !fuzzyMatch(a, b) {
+		t.Error("Findings with no locations should match when title/category are the same")
+	}
+}
+
+func TestTitleSimilar_EmptyWords(t *testing.T) {
+	// titleSimilar trims spaces, so "   " becomes "" which is a substring of anything.
+	// This is the expected behavior — an empty title is contained in any string.
+	if !titleSimilar("   ", "word") {
+		t.Error("Whitespace-only title (trimmed to empty) is a substring of any title")
+	}
+}
+
 func TestMergeResults_AllUnique(t *testing.T) {
 	// Two models find completely different things
 	results := []compareModelResult{

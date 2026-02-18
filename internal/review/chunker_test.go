@@ -156,6 +156,108 @@ func TestRunChunked(t *testing.T) {
 	_ = llmMs // timing is non-deterministic in tests
 }
 
+// errorReviewer returns an error on every call.
+type errorReviewer struct{}
+
+func (e *errorReviewer) Review(_ context.Context, _ providers.ReviewRequest) (providers.ReviewResponse, error) {
+	return providers.ReviewResponse{}, fmt.Errorf("provider error")
+}
+func (e *errorReviewer) Name() string { return "error-mock" }
+
+// invalidJSONReviewer returns invalid JSON first, then valid JSON on repair.
+type invalidJSONReviewer struct {
+	callCount int
+}
+
+func (m *invalidJSONReviewer) Review(_ context.Context, _ providers.ReviewRequest) (providers.ReviewResponse, error) {
+	m.callCount++
+	if m.callCount == 1 {
+		return providers.ReviewResponse{Content: "not valid json {{{"}, nil
+	}
+	return providers.ReviewResponse{Content: "[]"}, nil
+}
+func (m *invalidJSONReviewer) Name() string { return "invalid-json-mock" }
+
+func TestRunChunked_ProviderError(t *testing.T) {
+	chunks := []Chunk{
+		{Index: 0, Diff: "diff a", Files: []string{"a.go"}},
+	}
+	cfg := config.Default()
+	_, _, err := RunChunked(context.Background(), chunks, &errorReviewer{}, cfg)
+	if err == nil {
+		t.Error("Expected error from provider")
+	}
+	if !strings.Contains(err.Error(), "chunk 0") {
+		t.Errorf("Error should reference chunk index, got: %v", err)
+	}
+}
+
+func TestRunChunked_InvalidJSONWithRepair(t *testing.T) {
+	chunks := []Chunk{
+		{Index: 0, Diff: "diff a", Files: []string{"a.go"}},
+	}
+	mock := &invalidJSONReviewer{}
+	cfg := config.Default()
+	findings, _, err := RunChunked(context.Background(), chunks, mock, cfg)
+	if err != nil {
+		t.Fatalf("RunChunked error: %v", err)
+	}
+	if len(findings) != 0 {
+		t.Errorf("got %d findings, want 0", len(findings))
+	}
+	if mock.callCount != 2 {
+		t.Errorf("Expected 2 calls (initial + repair), got %d", mock.callCount)
+	}
+}
+
+func TestSplitIntoChunks_DefaultMaxBytes(t *testing.T) {
+	diff := "diff --git a/a.go b/a.go\n+++ b/a.go\n+line\n"
+	chunks := SplitIntoChunks(diff, 0) // 0 means default
+	if len(chunks) != 1 {
+		t.Errorf("got %d chunks, want 1", len(chunks))
+	}
+}
+
+func TestDeduplicateFindings(t *testing.T) {
+	findings := []Finding{
+		{ID: "a", Title: "Finding A"},
+		{ID: "b", Title: "Finding B"},
+		{ID: "a", Title: "Finding A duplicate"},
+	}
+	result := deduplicateFindings(findings)
+	if len(result) != 2 {
+		t.Errorf("got %d findings, want 2", len(result))
+	}
+}
+
+func TestFindingPath_NoLocations(t *testing.T) {
+	f := Finding{Title: "No locations"}
+	if findingPath(f) != "" {
+		t.Errorf("findingPath with no locations should be empty")
+	}
+}
+
+func TestFindingStartLine_NoLocations(t *testing.T) {
+	f := Finding{Title: "No locations"}
+	if findingStartLine(f) != 0 {
+		t.Errorf("findingStartLine with no locations should be 0")
+	}
+}
+
+func TestPathFromSection_NoHeader(t *testing.T) {
+	section := "diff --git a/main.go b/main.go\nsome content without +++ header\n"
+	if pathFromSection(section) != "" {
+		t.Error("pathFromSection should return empty for section without +++ b/ header")
+	}
+}
+
+func TestSplitSections_WhitespaceOnly(t *testing.T) {
+	sections := splitSections("   \n\t\n  ")
+	if len(sections) != 0 {
+		t.Errorf("got %d sections for whitespace-only, want 0", len(sections))
+	}
+}
+
 func TestRunChunked_Deduplication(t *testing.T) {
 	// Both chunks return the same finding
 	same := `[{"severity":"high","category":"bug","title":"Same Bug","message":"msg","suggestion":"fix","confidence":0.9,"path":"shared.go","startLine":10,"endLine":12,"tags":[]}]`

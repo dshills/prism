@@ -188,3 +188,287 @@ func TestConfigPrecedence(t *testing.T) {
 		t.Errorf("After override, Provider = %q, want %q", cfg.Provider, "gemini")
 	}
 }
+
+func TestMergeFile_BoolFields(t *testing.T) {
+	// When a config file is loaded (has non-zero fields), its booleans should be trusted
+	dst := Default()
+	src := Config{
+		Provider: "openai",
+		Cache:    CacheConfig{Enabled: false},
+		Privacy:  PrivacyConfig{RedactSecrets: false},
+	}
+	mergeFile(&dst, src)
+
+	if dst.Cache.Enabled != false {
+		t.Error("Cache.Enabled should be false when file explicitly sets it")
+	}
+	if dst.Privacy.RedactSecrets != false {
+		t.Error("RedactSecrets should be false when file explicitly sets it")
+	}
+}
+
+func TestMergeFile_BoolFields_EmptyFile(t *testing.T) {
+	// When file has no non-zero fields, defaults should be preserved
+	dst := Default()
+	src := Config{} // empty file
+	mergeFile(&dst, src)
+
+	if !dst.Cache.Enabled {
+		t.Error("Cache.Enabled should remain true when file is empty")
+	}
+	if !dst.Privacy.RedactSecrets {
+		t.Error("RedactSecrets should remain true when file is empty")
+	}
+}
+
+func TestMergeFile_AllFields(t *testing.T) {
+	dst := Default()
+	src := Config{
+		Provider:     "openai",
+		Model:        "gpt-4o",
+		Compare:      []string{"anthropic:claude", "openai:gpt-4o"},
+		Format:       "json",
+		FailOn:       "high",
+		MaxFindings:  100,
+		ContextLines: 10,
+		Include:      []string{"*.go"},
+		Exclude:      []string{"test/**"},
+		MaxDiffBytes: 1000000,
+		RulesFile:    "rules.json",
+		Cache: CacheConfig{
+			Dir:        "/tmp/cache",
+			TTLSeconds: 3600,
+		},
+		Privacy: PrivacyConfig{
+			RedactPaths: []string{"**/.secret"},
+		},
+	}
+	mergeFile(&dst, src)
+
+	if dst.Provider != "openai" {
+		t.Errorf("Provider = %q, want %q", dst.Provider, "openai")
+	}
+	if dst.Model != "gpt-4o" {
+		t.Errorf("Model = %q, want %q", dst.Model, "gpt-4o")
+	}
+	if len(dst.Compare) != 2 {
+		t.Errorf("Compare len = %d, want 2", len(dst.Compare))
+	}
+	if dst.Format != "json" {
+		t.Errorf("Format = %q, want %q", dst.Format, "json")
+	}
+	if dst.MaxFindings != 100 {
+		t.Errorf("MaxFindings = %d, want 100", dst.MaxFindings)
+	}
+	if dst.ContextLines != 10 {
+		t.Errorf("ContextLines = %d, want 10", dst.ContextLines)
+	}
+	if dst.MaxDiffBytes != 1000000 {
+		t.Errorf("MaxDiffBytes = %d, want 1000000", dst.MaxDiffBytes)
+	}
+	if dst.RulesFile != "rules.json" {
+		t.Errorf("RulesFile = %q, want %q", dst.RulesFile, "rules.json")
+	}
+	if dst.Cache.Dir != "/tmp/cache" {
+		t.Errorf("Cache.Dir = %q, want %q", dst.Cache.Dir, "/tmp/cache")
+	}
+	if dst.Cache.TTLSeconds != 3600 {
+		t.Errorf("Cache.TTLSeconds = %d, want 3600", dst.Cache.TTLSeconds)
+	}
+}
+
+func TestMergeEnv_InvalidMaxFindings(t *testing.T) {
+	orig := os.Getenv("PRISM_MAX_FINDINGS")
+	defer func() {
+		if orig == "" {
+			os.Unsetenv("PRISM_MAX_FINDINGS")
+		} else {
+			os.Setenv("PRISM_MAX_FINDINGS", orig)
+		}
+	}()
+
+	os.Setenv("PRISM_MAX_FINDINGS", "notanumber")
+
+	cfg := Default()
+	err := mergeEnv(&cfg)
+	if err == nil {
+		t.Error("Expected error for invalid PRISM_MAX_FINDINGS")
+	}
+}
+
+func TestMergeEnv_InvalidContextLines(t *testing.T) {
+	orig := os.Getenv("PRISM_CONTEXT_LINES")
+	defer func() {
+		if orig == "" {
+			os.Unsetenv("PRISM_CONTEXT_LINES")
+		} else {
+			os.Setenv("PRISM_CONTEXT_LINES", orig)
+		}
+	}()
+
+	os.Setenv("PRISM_CONTEXT_LINES", "abc")
+
+	cfg := Default()
+	err := mergeEnv(&cfg)
+	if err == nil {
+		t.Error("Expected error for invalid PRISM_CONTEXT_LINES")
+	}
+}
+
+func TestMergeOverrides_Compare(t *testing.T) {
+	cfg := Default()
+	mergeOverrides(&cfg, map[string]string{
+		"compare": "anthropic:claude,openai:gpt-4o",
+	})
+	if len(cfg.Compare) != 2 {
+		t.Fatalf("Compare len = %d, want 2", len(cfg.Compare))
+	}
+	if cfg.Compare[0] != "anthropic:claude" {
+		t.Errorf("Compare[0] = %q, want %q", cfg.Compare[0], "anthropic:claude")
+	}
+}
+
+func TestMergeOverrides_AllNumericFields(t *testing.T) {
+	cfg := Default()
+	mergeOverrides(&cfg, map[string]string{
+		"contextLines": "10",
+		"maxDiffBytes": "2000000",
+		"rulesFile":    "my-rules.json",
+	})
+	if cfg.ContextLines != 10 {
+		t.Errorf("ContextLines = %d, want 10", cfg.ContextLines)
+	}
+	if cfg.MaxDiffBytes != 2000000 {
+		t.Errorf("MaxDiffBytes = %d, want 2000000", cfg.MaxDiffBytes)
+	}
+	if cfg.RulesFile != "my-rules.json" {
+		t.Errorf("RulesFile = %q, want %q", cfg.RulesFile, "my-rules.json")
+	}
+}
+
+func TestConfigDir_XDG(t *testing.T) {
+	orig := os.Getenv("XDG_CONFIG_HOME")
+	defer func() {
+		if orig == "" {
+			os.Unsetenv("XDG_CONFIG_HOME")
+		} else {
+			os.Setenv("XDG_CONFIG_HOME", orig)
+		}
+	}()
+
+	os.Setenv("XDG_CONFIG_HOME", "/tmp/xdg-test")
+	dir, err := ConfigDir()
+	if err != nil {
+		t.Fatalf("ConfigDir error: %v", err)
+	}
+	if dir != "/tmp/xdg-test/prism" {
+		t.Errorf("ConfigDir = %q, want %q", dir, "/tmp/xdg-test/prism")
+	}
+}
+
+func TestConfigPath(t *testing.T) {
+	orig := os.Getenv("XDG_CONFIG_HOME")
+	defer func() {
+		if orig == "" {
+			os.Unsetenv("XDG_CONFIG_HOME")
+		} else {
+			os.Setenv("XDG_CONFIG_HOME", orig)
+		}
+	}()
+
+	os.Setenv("XDG_CONFIG_HOME", "/tmp/xdg-test")
+	path, err := ConfigPath()
+	if err != nil {
+		t.Fatalf("ConfigPath error: %v", err)
+	}
+	if path != "/tmp/xdg-test/prism/config.json" {
+		t.Errorf("ConfigPath = %q, want %q", path, "/tmp/xdg-test/prism/config.json")
+	}
+}
+
+func TestSaveAndLoadFile(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	orig := os.Getenv("XDG_CONFIG_HOME")
+	defer func() {
+		if orig == "" {
+			os.Unsetenv("XDG_CONFIG_HOME")
+		} else {
+			os.Setenv("XDG_CONFIG_HOME", orig)
+		}
+	}()
+	os.Setenv("XDG_CONFIG_HOME", tmpDir)
+
+	cfg := Default()
+	cfg.Provider = "openai"
+	cfg.Model = "gpt-4o"
+	cfg.MaxFindings = 25
+
+	if err := Save(cfg); err != nil {
+		t.Fatalf("Save error: %v", err)
+	}
+
+	loaded, err := LoadFile()
+	if err != nil {
+		t.Fatalf("LoadFile error: %v", err)
+	}
+	if loaded.Provider != "openai" {
+		t.Errorf("Provider = %q, want %q", loaded.Provider, "openai")
+	}
+	if loaded.Model != "gpt-4o" {
+		t.Errorf("Model = %q, want %q", loaded.Model, "gpt-4o")
+	}
+	if loaded.MaxFindings != 25 {
+		t.Errorf("MaxFindings = %d, want 25", loaded.MaxFindings)
+	}
+}
+
+func TestLoadFile_NoFile(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	orig := os.Getenv("XDG_CONFIG_HOME")
+	defer func() {
+		if orig == "" {
+			os.Unsetenv("XDG_CONFIG_HOME")
+		} else {
+			os.Setenv("XDG_CONFIG_HOME", orig)
+		}
+	}()
+	os.Setenv("XDG_CONFIG_HOME", tmpDir)
+
+	cfg, err := LoadFile()
+	if err != nil {
+		t.Fatalf("LoadFile error: %v", err)
+	}
+	// Should return zero config, not defaults
+	if cfg.Provider != "" {
+		t.Errorf("Provider should be empty for missing file, got %q", cfg.Provider)
+	}
+}
+
+func TestLoad_Integration(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	orig := os.Getenv("XDG_CONFIG_HOME")
+	defer func() {
+		if orig == "" {
+			os.Unsetenv("XDG_CONFIG_HOME")
+		} else {
+			os.Setenv("XDG_CONFIG_HOME", orig)
+		}
+	}()
+	os.Setenv("XDG_CONFIG_HOME", tmpDir)
+
+	// No config file — should get defaults + overrides
+	cfg, err := Load(map[string]string{"provider": "openai"})
+	if err != nil {
+		t.Fatalf("Load error: %v", err)
+	}
+	if cfg.Provider != "openai" {
+		t.Errorf("Provider = %q, want %q", cfg.Provider, "openai")
+	}
+	// Defaults should be preserved for unset fields
+	if cfg.MaxFindings != 50 {
+		t.Errorf("MaxFindings = %d, want 50 (default)", cfg.MaxFindings)
+	}
+}
