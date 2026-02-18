@@ -279,3 +279,52 @@ func TestRunChunked_Deduplication(t *testing.T) {
 		t.Errorf("got %d findings, want 1 (should deduplicate)", len(findings))
 	}
 }
+
+func TestRunChunkedWithOptions_CustomBuilder(t *testing.T) {
+	chunks := []Chunk{
+		{Index: 0, Diff: "diff a", Files: []string{"a.go"}},
+	}
+
+	mock := &mockReviewer{
+		responses: []string{
+			`[{"severity":"medium","category":"correctness","title":"Issue","message":"msg","suggestion":"fix","confidence":0.8,"path":"a.go","startLine":1,"endLine":1,"tags":[]}]`,
+		},
+	}
+
+	var calledWith []string
+	customBuilder := func(chunkDiff string, files []string, cfg config.Config, rules *Rules) (string, string) {
+		calledWith = append(calledWith, chunkDiff)
+		return "custom system prompt", "custom user prompt for: " + chunkDiff
+	}
+
+	cfg := config.Default()
+	findings, _, err := RunChunkedWithOptions(context.Background(), chunks, mock, cfg, nil, ChunkOptions{
+		Builder: customBuilder,
+	})
+	if err != nil {
+		t.Fatalf("RunChunkedWithOptions error: %v", err)
+	}
+	if len(findings) != 1 {
+		t.Errorf("got %d findings, want 1", len(findings))
+	}
+	if len(calledWith) != 1 || calledWith[0] != "diff a" {
+		t.Errorf("Custom builder called with %v, want [\"diff a\"]", calledWith)
+	}
+}
+
+func TestRunChunkedWithOptions_NilBuilder(t *testing.T) {
+	chunks := []Chunk{
+		{Index: 0, Diff: "diff a", Files: []string{"a.go"}},
+	}
+	mock := &mockReviewer{responses: []string{`[]`}}
+	cfg := config.Default()
+
+	// nil builder should use default
+	findings, _, err := RunChunkedWithOptions(context.Background(), chunks, mock, cfg, nil, ChunkOptions{})
+	if err != nil {
+		t.Fatalf("RunChunkedWithOptions error: %v", err)
+	}
+	if len(findings) != 0 {
+		t.Errorf("got %d findings, want 0", len(findings))
+	}
+}

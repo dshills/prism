@@ -259,6 +259,105 @@ func GenerateRunID() string {
 	return fmt.Sprintf("%x", h[:16])
 }
 
+// CodebaseConfig extends config with codebase-specific options.
+type CodebaseConfig struct {
+	config.Config
+	MaxFindingsPerFile int
+}
+
+// RunCodebase executes a full-codebase review.
+func RunCodebase(ctx context.Context, diff gitctx.DiffResult, cfg CodebaseConfig) (*Report, error) {
+	startTime := time.Now()
+
+	redactedDiff := diff.Diff
+	if cfg.Privacy.RedactSecrets {
+		redactedDiff = redact.Secrets(redactedDiff)
+	}
+
+	if strings.TrimSpace(redactedDiff) == "" {
+		return emptyReport(diff, startTime), nil
+	}
+
+	// Initialize cache
+	reviewCache, err := cache.New(cfg.Cache.Enabled, cfg.Cache.Dir, cfg.Cache.TTLSeconds)
+	if err != nil {
+		reviewCache, _ = cache.New(false, "", 0)
+	}
+
+	cacheKey := cache.BuildCacheKey(cfg.Provider, cfg.Model, redactedDiff)
+
+	var findings []Finding
+	var llmMs int64
+	if cached, ok := reviewCache.Get(cacheKey); ok {
+		findings, err = parseFindings(cached)
+		if err != nil {
+			findings = nil
+		}
+	}
+
+	rules, err := LoadRules(cfg.RulesFile)
+	if err != nil {
+		return nil, fmt.Errorf("loading rules: %w", err)
+	}
+
+	if findings == nil {
+		provider, err := providers.New(cfg.Provider, cfg.Model)
+		if err != nil {
+			return nil, fmt.Errorf("creating provider: %w", err)
+		}
+
+		maxPerFile := cfg.MaxFindingsPerFile
+
+		codebaseBuilder := func(chunkDiff string, files []string, c config.Config, r *Rules) (string, string) {
+			return CodebaseSystemPrompt(), BuildCodebaseUserPrompt(chunkDiff, files, c.MaxFindings, maxPerFile, c.FailOn, r)
+		}
+
+		// Codebase review always chunks
+		chunks := SplitIntoChunks(redactedDiff, cfg.MaxDiffBytes)
+		findings, llmMs, err = RunChunkedWithOptions(ctx, chunks, provider, cfg.Config, rules, ChunkOptions{
+			Builder: codebaseBuilder,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("codebase review: %w", err)
+		}
+
+		if rawJSON, jerr := json.Marshal(findingsToRaw(findings)); jerr == nil {
+			_ = reviewCache.Put(cacheKey, string(rawJSON))
+		}
+	}
+
+	findings = ApplySeverityOverrides(findings, rules)
+
+	if cfg.MaxFindings > 0 && len(findings) > cfg.MaxFindings {
+		findings = findings[:cfg.MaxFindings]
+	}
+
+	totalMs := time.Since(startTime).Milliseconds()
+
+	report := &Report{
+		Tool:    "prism",
+		Version: "1.0",
+		RunID:   GenerateRunID(),
+		Repo: RepoInfo{
+			Root:   diff.Repo.Root,
+			Head:   diff.Repo.Head,
+			Branch: diff.Repo.Branch,
+		},
+		Inputs: InputInfo{
+			Mode:  diff.Mode,
+			Range: diff.Range,
+		},
+		Summary:  ComputeSummary(findings),
+		Findings: findings,
+		Timing: Timing{
+			LLMMs:   llmMs,
+			TotalMs: totalMs,
+		},
+	}
+
+	return report, nil
+}
+
 func emptyReport(diff gitctx.DiffResult, startTime time.Time) *Report {
 	return &Report{
 		Tool:    "prism",

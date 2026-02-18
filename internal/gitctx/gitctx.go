@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 )
 
@@ -231,7 +232,7 @@ func filterExcluded(diff string, excludes []string) string {
 	var kept []string
 	for _, section := range sections {
 		path := extractPathFromSection(section)
-		if path == "" || !matchesAny(path, excludes) {
+		if path == "" || !MatchesAny(path, excludes) {
 			kept = append(kept, section)
 		}
 	}
@@ -268,14 +269,15 @@ func extractPathFromSection(section string) string {
 func filterFileList(files []string, excludes []string) []string {
 	var result []string
 	for _, f := range files {
-		if !matchesAny(f, excludes) {
+		if !MatchesAny(f, excludes) {
 			result = append(result, f)
 		}
 	}
 	return result
 }
 
-func matchesAny(path string, patterns []string) bool {
+// MatchesAny returns true if the path matches any of the given glob patterns.
+func MatchesAny(path string, patterns []string) bool {
 	for _, pattern := range patterns {
 		matched, err := filepath.Match(pattern, path)
 		if err == nil && matched {
@@ -294,6 +296,113 @@ func matchesAny(path string, patterns []string) bool {
 		}
 	}
 	return false
+}
+
+// maxFileBytes is the per-file size limit for codebase review.
+const maxFileBytes = 1 << 20 // 1MB
+
+// WalkFiles returns all git-tracked, non-binary files matching the
+// include/exclude filters. Uses `git ls-files` for the file list and
+// detects binaries via `git diff --no-index --numstat /dev/null <file>`.
+func WalkFiles(opts DiffOptions) ([]string, error) {
+	out, err := gitOutput("ls-files")
+	if err != nil {
+		return nil, fmt.Errorf("git ls-files: %w", err)
+	}
+
+	var files []string
+	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		// Apply include filter
+		if len(opts.Include) > 0 {
+			if !MatchesAny(line, opts.Include) {
+				continue
+			}
+		}
+		// Apply exclude filter
+		if len(opts.Exclude) > 0 {
+			if MatchesAny(line, opts.Exclude) {
+				continue
+			}
+		}
+		// Skip binary files
+		if isBinary(line) {
+			continue
+		}
+		files = append(files, line)
+	}
+
+	sort.Strings(files)
+	return files, nil
+}
+
+// isBinary detects whether a file is binary using git diff --numstat.
+// Binary files show "-\t-\t" for added/removed lines.
+func isBinary(path string) bool {
+	out, _ := gitOutput("diff", "--no-index", "--numstat", "/dev/null", path)
+	return strings.HasPrefix(strings.TrimSpace(out), "-\t-\t")
+}
+
+// Codebase reads all tracked source files and assembles them as
+// synthetic unified diffs. Returns a DiffResult with Mode="codebase".
+func Codebase(opts DiffOptions) (DiffResult, error) {
+	meta, err := GetRepoMeta()
+	if err != nil {
+		return DiffResult{}, err
+	}
+
+	files, err := WalkFiles(opts)
+	if err != nil {
+		return DiffResult{}, err
+	}
+
+	var combined strings.Builder
+	var includedFiles []string
+	totalBytes := 0
+
+	for _, path := range files {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			continue // skip unreadable files
+		}
+		if len(data) > maxFileBytes {
+			continue // skip oversized files
+		}
+
+		content := string(data)
+		lines := strings.Split(content, "\n")
+
+		var section strings.Builder
+		fmt.Fprintf(&section, "diff --git a/%s b/%s\n", path, path)
+		fmt.Fprintf(&section, "new file mode 100644\n")
+		fmt.Fprintf(&section, "--- /dev/null\n")
+		fmt.Fprintf(&section, "+++ b/%s\n", path)
+		fmt.Fprintf(&section, "@@ -0,0 +1,%d @@\n", len(lines))
+		for _, line := range lines {
+			fmt.Fprintf(&section, "+%s\n", line)
+		}
+
+		sectionStr := section.String()
+
+		// Respect MaxDiffBytes as total budget
+		if opts.MaxDiffBytes > 0 && totalBytes+len(sectionStr) > opts.MaxDiffBytes {
+			break
+		}
+
+		combined.WriteString(sectionStr)
+		includedFiles = append(includedFiles, path)
+		totalBytes += len(sectionStr)
+	}
+
+	return DiffResult{
+		Diff:  combined.String(),
+		Files: includedFiles,
+		Mode:  "codebase",
+		Repo:  meta,
+	}, nil
 }
 
 func gitOutput(args ...string) (string, error) {

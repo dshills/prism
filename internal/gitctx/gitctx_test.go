@@ -1,6 +1,9 @@
 package gitctx
 
 import (
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -74,9 +77,9 @@ func TestMatchesAny(t *testing.T) {
 		{"main.go", []string{"*.go"}, true},
 	}
 	for _, tt := range tests {
-		got := matchesAny(tt.path, tt.patterns)
+		got := MatchesAny(tt.path, tt.patterns)
 		if got != tt.want {
-			t.Errorf("matchesAny(%q, %v) = %v, want %v", tt.path, tt.patterns, got, tt.want)
+			t.Errorf("MatchesAny(%q, %v) = %v, want %v", tt.path, tt.patterns, got, tt.want)
 		}
 	}
 }
@@ -304,10 +307,154 @@ func TestExtractFiles_Empty(t *testing.T) {
 }
 
 func TestMatchesAny_EmptyPatterns(t *testing.T) {
-	if matchesAny("main.go", nil) {
+	if MatchesAny("main.go", nil) {
 		t.Error("matchesAny with nil patterns should return false")
 	}
-	if matchesAny("main.go", []string{}) {
+	if MatchesAny("main.go", []string{}) {
 		t.Error("matchesAny with empty patterns should return false")
+	}
+}
+
+// setupTestRepo creates a temp git repo with some tracked files and returns
+// the path. Caller must defer cleanup.
+func setupTestRepo(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+
+	run := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command(args[0], args[1:]...)
+		cmd.Dir = dir
+		cmd.Env = append(os.Environ(),
+			"GIT_AUTHOR_NAME=test",
+			"GIT_AUTHOR_EMAIL=test@test.com",
+			"GIT_COMMITTER_NAME=test",
+			"GIT_COMMITTER_EMAIL=test@test.com",
+		)
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("command %v failed: %v\n%s", args, err, out)
+		}
+	}
+
+	run("git", "init")
+	run("git", "checkout", "-b", "main")
+
+	// Create source files
+	os.WriteFile(filepath.Join(dir, "main.go"), []byte("package main\n\nfunc main() {}\n"), 0o644)
+	os.WriteFile(filepath.Join(dir, "util.go"), []byte("package main\n\nfunc helper() {}\n"), 0o644)
+	os.MkdirAll(filepath.Join(dir, "vendor"), 0o755)
+	os.WriteFile(filepath.Join(dir, "vendor", "lib.go"), []byte("package vendor\n"), 0o644)
+
+	run("git", "add", "-A")
+	run("git", "commit", "-m", "init")
+
+	return dir
+}
+
+func TestWalkFiles(t *testing.T) {
+	dir := setupTestRepo(t)
+	origDir, _ := os.Getwd()
+	os.Chdir(dir)
+	defer os.Chdir(origDir)
+
+	files, err := WalkFiles(DiffOptions{})
+	if err != nil {
+		t.Fatalf("WalkFiles error: %v", err)
+	}
+
+	if len(files) < 3 {
+		t.Errorf("expected at least 3 files, got %d: %v", len(files), files)
+	}
+
+	// Check that files are sorted
+	for i := 1; i < len(files); i++ {
+		if files[i] < files[i-1] {
+			t.Errorf("files not sorted: %v", files)
+			break
+		}
+	}
+}
+
+func TestWalkFiles_WithInclude(t *testing.T) {
+	dir := setupTestRepo(t)
+	origDir, _ := os.Getwd()
+	os.Chdir(dir)
+	defer os.Chdir(origDir)
+
+	files, err := WalkFiles(DiffOptions{Include: []string{"*.go"}})
+	if err != nil {
+		t.Fatalf("WalkFiles error: %v", err)
+	}
+
+	for _, f := range files {
+		if !strings.HasSuffix(f, ".go") {
+			t.Errorf("include filter failed: got %q", f)
+		}
+	}
+}
+
+func TestWalkFiles_WithExclude(t *testing.T) {
+	dir := setupTestRepo(t)
+	origDir, _ := os.Getwd()
+	os.Chdir(dir)
+	defer os.Chdir(origDir)
+
+	files, err := WalkFiles(DiffOptions{Exclude: []string{"vendor/**"}})
+	if err != nil {
+		t.Fatalf("WalkFiles error: %v", err)
+	}
+
+	for _, f := range files {
+		if strings.HasPrefix(f, "vendor/") {
+			t.Errorf("exclude filter failed: got %q", f)
+		}
+	}
+}
+
+func TestCodebase(t *testing.T) {
+	dir := setupTestRepo(t)
+	origDir, _ := os.Getwd()
+	os.Chdir(dir)
+	defer os.Chdir(origDir)
+
+	result, err := Codebase(DiffOptions{})
+	if err != nil {
+		t.Fatalf("Codebase error: %v", err)
+	}
+
+	if result.Mode != "codebase" {
+		t.Errorf("Mode = %q, want %q", result.Mode, "codebase")
+	}
+
+	if len(result.Files) == 0 {
+		t.Error("Expected at least one file")
+	}
+
+	// Check synthetic diff format
+	if !strings.Contains(result.Diff, "diff --git") {
+		t.Error("Diff should contain diff headers")
+	}
+	if !strings.Contains(result.Diff, "+++ b/") {
+		t.Error("Diff should contain +++ b/ headers")
+	}
+	if !strings.Contains(result.Diff, "+package main") {
+		t.Error("Diff should contain file contents as added lines")
+	}
+}
+
+func TestCodebase_MaxDiffBytes(t *testing.T) {
+	dir := setupTestRepo(t)
+	origDir, _ := os.Getwd()
+	os.Chdir(dir)
+	defer os.Chdir(origDir)
+
+	result, err := Codebase(DiffOptions{MaxDiffBytes: 100})
+	if err != nil {
+		t.Fatalf("Codebase error: %v", err)
+	}
+
+	if len(result.Diff) > 200 { // some tolerance for the last file included
+		t.Errorf("Diff should be limited by MaxDiffBytes, got %d bytes", len(result.Diff))
 	}
 }

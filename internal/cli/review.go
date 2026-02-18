@@ -308,9 +308,10 @@ var reviewRangeCmd = &cobra.Command{
 }
 
 var (
-	flagSnippetPath string
-	flagSnippetLang string
-	flagSnippetBase string
+	flagSnippetPath        string
+	flagSnippetLang        string
+	flagSnippetBase        string
+	flagMaxFindingsPerFile int
 )
 
 var reviewSnippetCmd = &cobra.Command{
@@ -356,6 +357,139 @@ var reviewSnippetCmd = &cobra.Command{
 	},
 }
 
+var reviewCodebaseCmd = &cobra.Command{
+	Use:   "codebase",
+	Short: "Review all tracked files in the repository",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		cfg, err := config.Load(buildOverrides())
+		if err != nil {
+			return err
+		}
+		diff, err := gitctx.Codebase(buildDiffOpts(cfg))
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			exitCode = ExitRuntimeError
+			return nil
+		}
+		runCodebaseReview(diff, cfg)
+		return nil
+	},
+}
+
+func runCodebaseReview(diff gitctx.DiffResult, cfg config.Config) {
+	if flagNoRedact {
+		cfg.Privacy.RedactSecrets = false
+		fmt.Fprintln(os.Stderr, "WARNING: secret redaction is disabled")
+	}
+
+	var compareModels []string
+	if flagCompare != "" {
+		compareModels = splitComma(flagCompare)
+	} else if len(cfg.Compare) > 0 {
+		compareModels = cfg.Compare
+	}
+
+	ctx := context.Background()
+
+	var report *review.Report
+	var err error
+
+	if len(compareModels) >= 2 {
+		report, err = runCodebaseCompareMode(ctx, diff, cfg, compareModels)
+	} else {
+		cbCfg := review.CodebaseConfig{
+			Config:             cfg,
+			MaxFindingsPerFile: flagMaxFindingsPerFile,
+		}
+		report, err = review.RunCodebase(ctx, diff, cbCfg)
+	}
+
+	if err != nil {
+		if providers.IsAuthError(err) {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			exitCode = ExitAuthError
+			return
+		}
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		exitCode = ExitRuntimeError
+		return
+	}
+
+	if err := output.WriteReport(report, cfg.Format, flagOut); err != nil {
+		fmt.Fprintf(os.Stderr, "Error writing output: %v\n", err)
+		exitCode = ExitRuntimeError
+		return
+	}
+
+	if cfg.FailOn != "none" && cfg.FailOn != "" {
+		for _, f := range report.Findings {
+			if review.MeetsThreshold(f.Severity, cfg.FailOn) {
+				exitCode = ExitFindings
+				return
+			}
+		}
+	}
+}
+
+func runCodebaseCompareMode(ctx context.Context, diff gitctx.DiffResult, cfg config.Config, models []string) (*review.Report, error) {
+	startTime := time.Now()
+
+	rules, err := review.LoadRules(cfg.RulesFile)
+	if err != nil {
+		return nil, fmt.Errorf("loading rules: %w", err)
+	}
+
+	maxPerFile := flagMaxFindingsPerFile
+	codebaseBuilder := func(chunkDiff string, files []string, c config.Config, r *review.Rules) (string, string) {
+		return review.CodebaseSystemPrompt(), review.BuildCodebaseUserPrompt(chunkDiff, files, c.MaxFindings, maxPerFile, c.FailOn, r)
+	}
+
+	cr, err := review.RunCompareWithOptions(ctx, diff.Diff, diff.Files, models, cfg, rules, review.CompareOptions{
+		Builder: codebaseBuilder,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	findings := cr.All
+	if cfg.MaxFindings > 0 && len(findings) > cfg.MaxFindings {
+		findings = findings[:cfg.MaxFindings]
+	}
+
+	totalMs := time.Since(startTime).Milliseconds()
+
+	report := &review.Report{
+		Tool:    "prism",
+		Version: "1.0",
+		RunID:   review.GenerateRunID(),
+		Repo: review.RepoInfo{
+			Root:   diff.Repo.Root,
+			Head:   diff.Repo.Head,
+			Branch: diff.Repo.Branch,
+		},
+		Inputs: review.InputInfo{
+			Mode:  diff.Mode,
+			Range: diff.Range,
+		},
+		Summary:  review.ComputeSummary(findings),
+		Findings: findings,
+		Timing: review.Timing{
+			LLMMs:   cr.LLMMs,
+			TotalMs: totalMs,
+		},
+	}
+
+	fmt.Fprintf(os.Stderr, "Compare mode: %d models, %d consensus findings, %d total\n",
+		len(models), len(cr.Consensus), len(cr.All))
+	for label, unique := range cr.Unique {
+		if len(unique) > 0 {
+			fmt.Fprintf(os.Stderr, "  %s: %d unique findings\n", label, len(unique))
+		}
+	}
+
+	return report, nil
+}
+
 func init() {
 	// Add review subcommands
 	reviewCmd.AddCommand(reviewUnstagedCmd)
@@ -363,6 +497,7 @@ func init() {
 	reviewCmd.AddCommand(reviewCommitCmd)
 	reviewCmd.AddCommand(reviewRangeCmd)
 	reviewCmd.AddCommand(reviewSnippetCmd)
+	reviewCmd.AddCommand(reviewCodebaseCmd)
 
 	// Add shared flags to all review subcommands
 	for _, cmd := range []*cobra.Command{
@@ -371,9 +506,13 @@ func init() {
 		reviewCommitCmd,
 		reviewRangeCmd,
 		reviewSnippetCmd,
+		reviewCodebaseCmd,
 	} {
 		addReviewFlags(cmd)
 	}
+
+	// Codebase-specific flags
+	reviewCodebaseCmd.Flags().IntVar(&flagMaxFindingsPerFile, "max-findings-per-file", 10, "Maximum findings per file")
 
 	// Commit-specific flags
 	reviewCommitCmd.Flags().StringVar(&flagParent, "parent", "", "Override parent SHA (for merge commits)")

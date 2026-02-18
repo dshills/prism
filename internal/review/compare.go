@@ -27,9 +27,24 @@ type compareModelResult struct {
 	err      error
 }
 
+// CompareOptions controls how compare mode constructs prompts.
+type CompareOptions struct {
+	Builder PromptBuilder // nil = use default diff prompts
+}
+
 // RunCompare runs reviews independently across multiple provider:model pairs
 // and merges findings.
 func RunCompare(ctx context.Context, diff string, files []string, models []string, cfg config.Config, rules *Rules) (*CompareResult, error) {
+	return RunCompareWithOptions(ctx, diff, files, models, cfg, rules, CompareOptions{})
+}
+
+// RunCompareWithOptions runs compare mode with custom prompt construction.
+func RunCompareWithOptions(ctx context.Context, diff string, files []string, models []string, cfg config.Config, rules *Rules, opts CompareOptions) (*CompareResult, error) {
+	builder := opts.Builder
+	if builder == nil {
+		builder = defaultPromptBuilder
+	}
+
 	results := make([]compareModelResult, len(models))
 	var wg sync.WaitGroup
 	var totalLLMMs int64
@@ -57,12 +72,12 @@ func RunCompare(ctx context.Context, diff string, files []string, models []strin
 				redactedDiff = redact.Secrets(redactedDiff)
 			}
 
-			userPrompt := BuildUserPromptWithRules(redactedDiff, files, cfg.MaxFindings, cfg.FailOn, rules)
+			sysPr, userPr := builder(redactedDiff, files, cfg, rules)
 
 			llmStart := time.Now()
 			resp, err := provider.Review(ctx, providers.ReviewRequest{
-				SystemPrompt: SystemPrompt(),
-				UserPrompt:   userPrompt,
+				SystemPrompt: sysPr,
+				UserPrompt:   userPr,
 				MaxTokens:    8192,
 			})
 			elapsed := time.Since(llmStart).Milliseconds()

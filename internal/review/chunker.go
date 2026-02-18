@@ -82,6 +82,19 @@ func NeedsChunking(diff string) bool {
 	return len(diff) > ChunkThreshold
 }
 
+// PromptBuilder constructs system and user prompts for a chunk.
+type PromptBuilder func(chunkDiff string, files []string, cfg config.Config, rules *Rules) (systemPrompt, userPrompt string)
+
+// ChunkOptions controls how chunked review is performed.
+type ChunkOptions struct {
+	Builder PromptBuilder
+}
+
+// defaultPromptBuilder uses the standard diff-review prompts.
+func defaultPromptBuilder(chunkDiff string, files []string, cfg config.Config, rules *Rules) (string, string) {
+	return SystemPrompt(), BuildUserPromptWithRules(chunkDiff, files, cfg.MaxFindings, cfg.FailOn, rules)
+}
+
 // RunChunked reviews diff chunks in parallel and merges findings.
 func RunChunked(ctx context.Context, chunks []Chunk, provider providers.Reviewer, cfg config.Config) ([]Finding, int64, error) {
 	return RunChunkedWithRules(ctx, chunks, provider, cfg, nil)
@@ -89,6 +102,16 @@ func RunChunked(ctx context.Context, chunks []Chunk, provider providers.Reviewer
 
 // RunChunkedWithRules reviews diff chunks in parallel with optional rules.
 func RunChunkedWithRules(ctx context.Context, chunks []Chunk, provider providers.Reviewer, cfg config.Config, rules *Rules) ([]Finding, int64, error) {
+	return RunChunkedWithOptions(ctx, chunks, provider, cfg, rules, ChunkOptions{})
+}
+
+// RunChunkedWithOptions reviews diff chunks in parallel with custom prompt construction.
+func RunChunkedWithOptions(ctx context.Context, chunks []Chunk, provider providers.Reviewer, cfg config.Config, rules *Rules, opts ChunkOptions) ([]Finding, int64, error) {
+	builder := opts.Builder
+	if builder == nil {
+		builder = defaultPromptBuilder
+	}
+
 	type result struct {
 		index    int
 		findings []Finding
@@ -108,10 +131,10 @@ func RunChunkedWithRules(ctx context.Context, chunks []Chunk, provider providers
 			sem <- struct{}{}        // acquire
 			defer func() { <-sem }() // release
 
-			userPrompt := BuildUserPromptWithRules(chunk.Diff, chunk.Files, cfg.MaxFindings, cfg.FailOn, rules)
+			sysPr, userPr := builder(chunk.Diff, chunk.Files, cfg, rules)
 			req := providers.ReviewRequest{
-				SystemPrompt: SystemPrompt(),
-				UserPrompt:   userPrompt,
+				SystemPrompt: sysPr,
+				UserPrompt:   userPr,
 				MaxTokens:    8192,
 			}
 
@@ -136,7 +159,7 @@ func RunChunkedWithRules(ctx context.Context, chunks []Chunk, provider providers
 					err.Error(), resp.Content,
 				)
 				resp2, err2 := provider.Review(ctx, providers.ReviewRequest{
-					SystemPrompt: SystemPrompt(),
+					SystemPrompt: sysPr,
 					UserPrompt:   repairPrompt,
 					MaxTokens:    8192,
 				})

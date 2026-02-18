@@ -2,11 +2,11 @@
 
 Local-first CLI that reviews code changes using LLM providers and emits findings with deterministic exit codes for CI gating.
 
-Prism is **diff-centric** — it reviews only what changed, not your entire repo. It sends redacted diff hunks to one or more LLMs and returns structured findings with file paths, line numbers, and actionable suggestions.
+Prism is **diff-centric** — it reviews only what changed, not your entire repo. It sends redacted diff hunks to one or more LLMs and returns structured findings with file paths, line numbers, and actionable suggestions. For full-repository audits, Prism also supports a **codebase** mode that reviews all tracked source files.
 
 ## Features
 
-- **5 review modes**: unstaged, staged, commit, range, and stdin snippet
+- **6 review modes**: unstaged, staged, commit, range, snippet, and full codebase
 - **4 LLM providers**: Anthropic, OpenAI, Google Gemini, and Ollama/LMStudio (local)
 - **4 output formats**: text, JSON, markdown (PR-comment-ready), and SARIF v2.1.0
 - **Multi-model compare mode**: run multiple models in parallel and see consensus vs. unique findings
@@ -86,6 +86,15 @@ cat foo.go | prism review snippet --path foo.go --lang go
 cat foo.go | prism review snippet --path foo.go --base foo.go.orig
 ```
 
+**Full codebase** (all tracked files):
+```bash
+prism review codebase
+prism review codebase --paths "**/*.go" --max-findings-per-file 5
+prism review codebase --exclude "**/*_test.go" --fail-on high
+```
+
+Codebase mode reads all git-tracked, non-binary source files and reviews them as complete files rather than diffs. It always uses chunked review with bounded concurrency. Use `--paths` and `--exclude` to scope the review, and `--max-findings-per-file` to cap findings per file (default: 10).
+
 ### Multi-Model Compare
 
 Run the same review across multiple models and see which findings they agree on:
@@ -150,6 +159,7 @@ prism review staged --fail-on high
 | `prism review commit <sha>` | Review a specific commit |
 | `prism review range <A..B>` | Review a revision range |
 | `prism review snippet` | Review code from stdin |
+| `prism review codebase` | Review all tracked files in the repository |
 | `prism config init` | Create default config file |
 | `prism config set <key> <value>` | Set a config value |
 | `prism config show` | Show effective configuration |
@@ -200,6 +210,12 @@ All review subcommands accept these flags:
 | `--path` | File path for language detection | |
 | `--lang` | Language hint | |
 | `--base` | Base file to diff against | |
+
+**Codebase-specific:**
+
+| Flag | Description | Default |
+|------|-------------|---------|
+| `--max-findings-per-file` | Maximum findings per file | `10` |
 
 ## Configuration
 
