@@ -34,6 +34,8 @@ func New(provider, model string) (Reviewer, error) {
 		return NewOpenAI(model)
 	case "gemini", "google":
 		return NewGemini(model)
+	case "ollama", "lmstudio":
+		return NewOllama(model)
 	default:
 		return nil, fmt.Errorf("unknown provider: %s", provider)
 	}

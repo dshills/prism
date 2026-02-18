@@ -30,6 +30,8 @@ func Run() int {
 	rootCmd.AddCommand(configCmd)
 	rootCmd.AddCommand(modelsCmd)
 	rootCmd.AddCommand(cacheCmd)
+	rootCmd.AddCommand(hookCmd)
+	rootCmd.AddCommand(githubCmd)
 	rootCmd.AddCommand(versionCmd)
 
 	if err := rootCmd.Execute(); err != nil {

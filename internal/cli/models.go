@@ -49,6 +49,17 @@ var knownModels = []modelInfo{
 			"gemini-1.5-pro",
 		},
 	},
+	{
+		Provider: "ollama",
+		Models: []string{
+			"llama3",
+			"llama3.1",
+			"codellama",
+			"mistral",
+			"deepseek-coder-v2",
+			"qwen2.5-coder",
+		},
+	},
 }
 
 var modelsListCmd = &cobra.Command{
