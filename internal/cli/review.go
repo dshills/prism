@@ -38,7 +38,7 @@ func addReviewFlags(cmd *cobra.Command) {
 	cmd.Flags().IntVar(&flagMaxDiffBytes, "max-diff-bytes", 0, "Maximum diff size in bytes")
 	cmd.Flags().StringVar(&flagProvider, "provider", "", "LLM provider (anthropic, openai, gemini)")
 	cmd.Flags().StringVar(&flagModel, "model", "", "Model name")
-	cmd.Flags().StringVar(&flagFormat, "format", "", "Output format (text, json)")
+	cmd.Flags().StringVar(&flagFormat, "format", "", "Output format (text, json, sarif)")
 	cmd.Flags().StringVar(&flagOut, "out", "", "Output file path (default: stdout)")
 	cmd.Flags().StringVar(&flagFailOn, "fail-on", "", "Fail on severity threshold (none, low, medium, high)")
 	cmd.Flags().IntVar(&flagMaxFindings, "max-findings", 0, "Maximum number of findings")

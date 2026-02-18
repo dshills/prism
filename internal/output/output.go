@@ -20,6 +20,8 @@ func GetWriter(format string) (Writer, error) {
 		return &TextWriter{}, nil
 	case "json":
 		return &JSONWriter{}, nil
+	case "sarif":
+		return &SARIFWriter{}, nil
 	default:
 		return nil, fmt.Errorf("unsupported output format: %s", format)
 	}

@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/dshills/prism/internal/cache"
 	"github.com/dshills/prism/internal/config"
 	"github.com/dshills/prism/internal/gitctx"
 	"github.com/dshills/prism/internal/providers"
@@ -43,45 +44,81 @@ func Run(ctx context.Context, diff gitctx.DiffResult, cfg config.Config) (*Repor
 		return emptyReport(diff, gitMs, startTime), nil
 	}
 
-	provider, err := providers.New(cfg.Provider, cfg.Model)
+	// Initialize cache
+	reviewCache, err := cache.New(cfg.Cache.Enabled, cfg.Cache.Dir, cfg.Cache.TTLSeconds)
 	if err != nil {
-		return nil, fmt.Errorf("creating provider: %w", err)
+		// Cache failure is non-fatal, just disable it
+		reviewCache, _ = cache.New(false, "", 0)
 	}
 
-	userPrompt := BuildUserPrompt(redactedDiff, diff.Files, cfg.MaxFindings, cfg.FailOn)
+	cacheKey := cache.BuildCacheKey(cfg.Provider, cfg.Model, redactedDiff)
 
-	llmStart := time.Now()
-	req := providers.ReviewRequest{
-		SystemPrompt: SystemPrompt(),
-		UserPrompt:   userPrompt,
-		MaxTokens:    8192,
-	}
-
-	resp, err := provider.Review(ctx, req)
-	if err != nil {
-		return nil, fmt.Errorf("provider review: %w", err)
-	}
-	llmMs := time.Since(llmStart).Milliseconds()
-
-	findings, err := parseFindings(resp.Content)
-	if err != nil {
-		// Attempt one repair pass
-		repairPrompt := fmt.Sprintf(
-			"Your previous response was not valid JSON. The error was: %s\n\nPlease fix it and respond with ONLY a valid JSON array of findings.\n\nYour previous response was:\n%s",
-			err.Error(), resp.Content,
-		)
-		repairReq := providers.ReviewRequest{
-			SystemPrompt: SystemPrompt(),
-			UserPrompt:   repairPrompt,
-			MaxTokens:    8192,
-		}
-		resp2, err2 := provider.Review(ctx, repairReq)
-		if err2 != nil {
-			return nil, fmt.Errorf("repair pass failed: %w (original error: %w)", err2, err)
-		}
-		findings, err = parseFindings(resp2.Content)
+	// Check cache
+	var findings []Finding
+	var llmMs int64
+	if cached, ok := reviewCache.Get(cacheKey); ok {
+		findings, err = parseFindings(cached)
 		if err != nil {
-			return nil, fmt.Errorf("response validation failed after repair: %w", err)
+			// Cache entry is corrupt, fall through to LLM
+			findings = nil
+		}
+	}
+
+	if findings == nil {
+		provider, err := providers.New(cfg.Provider, cfg.Model)
+		if err != nil {
+			return nil, fmt.Errorf("creating provider: %w", err)
+		}
+
+		// Use chunked review for large diffs
+		if NeedsChunking(redactedDiff) {
+			chunks := SplitIntoChunks(redactedDiff, cfg.MaxDiffBytes)
+			findings, llmMs, err = RunChunked(ctx, chunks, provider, cfg)
+			if err != nil {
+				return nil, fmt.Errorf("chunked review: %w", err)
+			}
+		} else {
+			userPrompt := BuildUserPrompt(redactedDiff, diff.Files, cfg.MaxFindings, cfg.FailOn)
+
+			llmStart := time.Now()
+			req := providers.ReviewRequest{
+				SystemPrompt: SystemPrompt(),
+				UserPrompt:   userPrompt,
+				MaxTokens:    8192,
+			}
+
+			resp, err := provider.Review(ctx, req)
+			if err != nil {
+				return nil, fmt.Errorf("provider review: %w", err)
+			}
+			llmMs = time.Since(llmStart).Milliseconds()
+
+			findings, err = parseFindings(resp.Content)
+			if err != nil {
+				// Attempt one repair pass
+				repairPrompt := fmt.Sprintf(
+					"Your previous response was not valid JSON. The error was: %s\n\nPlease fix it and respond with ONLY a valid JSON array of findings.\n\nYour previous response was:\n%s",
+					err.Error(), resp.Content,
+				)
+				repairReq := providers.ReviewRequest{
+					SystemPrompt: SystemPrompt(),
+					UserPrompt:   repairPrompt,
+					MaxTokens:    8192,
+				}
+				resp2, err2 := provider.Review(ctx, repairReq)
+				if err2 != nil {
+					return nil, fmt.Errorf("repair pass failed: %w (original error: %w)", err2, err)
+				}
+				findings, err = parseFindings(resp2.Content)
+				if err != nil {
+					return nil, fmt.Errorf("response validation failed after repair: %w", err)
+				}
+			}
+		}
+
+		// Store in cache (the raw JSON response for the findings)
+		if findingsJSON, jerr := json.Marshal(findings); jerr == nil {
+			_ = reviewCache.Put(cacheKey, string(findingsJSON))
 		}
 	}
 

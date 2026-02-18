@@ -7,7 +7,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-const version = "0.1.0"
+const version = "0.2.0"
 
 // Exit codes per spec section 6.5
 const (
@@ -29,6 +29,7 @@ func Run() int {
 	rootCmd.AddCommand(reviewCmd)
 	rootCmd.AddCommand(configCmd)
 	rootCmd.AddCommand(modelsCmd)
+	rootCmd.AddCommand(cacheCmd)
 	rootCmd.AddCommand(versionCmd)
 
 	if err := rootCmd.Execute(); err != nil {
