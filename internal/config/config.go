@@ -44,7 +44,7 @@ type PrivacyConfig struct {
 func Default() Config {
 	return Config{
 		Provider:     "anthropic",
-		Model:        "claude-sonnet-4-20250514",
+		Model:        "claude-sonnet-4-6",
 		Format:       "text",
 		FailOn:       "none",
 		MaxFindings:  50,

@@ -29,9 +29,9 @@ type engineProviderSpec struct {
 }
 
 var engineProviderSpecs = []engineProviderSpec{
-	{"anthropic", "claude-sonnet-4-20250514", "ANTHROPIC_API_KEY"},
-	{"openai", "gpt-4o-mini", "OPENAI_API_KEY"},
-	{"gemini", "gemini-2.0-flash", "GEMINI_API_KEY"},
+	{"anthropic", "claude-sonnet-4-6", "ANTHROPIC_API_KEY"},
+	{"openai", "gpt-5.2", "OPENAI_API_KEY"},
+	{"gemini", "gemini-3-flash-preview", "GEMINI_API_KEY"},
 	{"ollama", "llama3", ""},
 }
 
@@ -215,7 +215,7 @@ func TestIntegration_Run_EmptyDiff(t *testing.T) {
 		Mode:  "unstaged",
 		Repo:  gitctx.RepoMeta{Root: "/tmp/empty", Head: "abc", Branch: "main"},
 	}
-	cfg := integrationConfig("anthropic", "claude-sonnet-4-20250514", "")
+	cfg := integrationConfig("anthropic", "claude-sonnet-4-6", "")
 
 	report, err := review.Run(ctx, diff, cfg)
 	if err != nil {

@@ -25,9 +25,9 @@ type providerSpec struct {
 }
 
 var providerSpecs = []providerSpec{
-	{"anthropic", "claude-sonnet-4-20250514", "ANTHROPIC_API_KEY"},
-	{"openai", "gpt-4o-mini", "OPENAI_API_KEY"},
-	{"gemini", "gemini-2.0-flash", "GEMINI_API_KEY"},
+	{"anthropic", "claude-sonnet-4-6", "ANTHROPIC_API_KEY"},
+	{"openai", "gpt-5.2", "OPENAI_API_KEY"},
+	{"gemini", "gemini-3-flash-preview", "GEMINI_API_KEY"},
 	{"ollama", "llama3", ""},
 }
 

@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 )
 
@@ -53,9 +54,14 @@ func (o *OpenAI) Review(ctx context.Context, req ReviewRequest) (ReviewResponse,
 	}
 
 	body := openaiRequest{
-		Model:     o.model,
-		Messages:  messages,
-		MaxTokens: maxTokens,
+		Model:    o.model,
+		Messages: messages,
+	}
+	// GPT-5.x and o-series models require max_completion_tokens instead of max_tokens
+	if usesMaxCompletionTokens(o.model) {
+		body.MaxCompletionTokens = maxTokens
+	} else {
+		body.MaxTokens = maxTokens
 	}
 	if req.Temperature > 0 {
 		body.Temperature = &req.Temperature
@@ -122,10 +128,20 @@ func (o *OpenAI) Review(ctx context.Context, req ReviewRequest) (ReviewResponse,
 }
 
 type openaiRequest struct {
-	Model       string          `json:"model"`
-	Messages    []openaiMessage `json:"messages"`
-	MaxTokens   int             `json:"max_tokens"`
-	Temperature *float64        `json:"temperature,omitempty"`
+	Model               string          `json:"model"`
+	Messages            []openaiMessage `json:"messages"`
+	MaxTokens           int             `json:"max_tokens,omitempty"`
+	MaxCompletionTokens int             `json:"max_completion_tokens,omitempty"`
+	Temperature         *float64        `json:"temperature,omitempty"`
+}
+
+// usesMaxCompletionTokens returns true for models that require
+// max_completion_tokens instead of max_tokens.
+func usesMaxCompletionTokens(model string) bool {
+	return strings.HasPrefix(model, "gpt-5") ||
+		strings.HasPrefix(model, "o1") ||
+		strings.HasPrefix(model, "o3") ||
+		strings.HasPrefix(model, "o4")
 }
 
 type openaiMessage struct {

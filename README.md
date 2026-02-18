@@ -7,12 +7,14 @@ Prism is **diff-centric** — it reviews only what changed, not your entire repo
 ## Features
 
 - **5 review modes**: unstaged, staged, commit, range, and stdin snippet
-- **3 LLM providers**: Anthropic, OpenAI, and Google Gemini
+- **4 LLM providers**: Anthropic, OpenAI, Google Gemini, and Ollama/LMStudio (local)
 - **4 output formats**: text, JSON, markdown (PR-comment-ready), and SARIF v2.1.0
 - **Multi-model compare mode**: run multiple models in parallel and see consensus vs. unique findings
 - **Secret redaction**: API keys, JWTs, private keys, and database credentials are automatically replaced with `[REDACTED]` before being sent to any provider
 - **Rules packs**: customize severity overrides, focus areas, and required checks
 - **Deterministic exit codes**: designed for CI pipelines and git hooks
+- **Pre-commit hook**: install/uninstall with `prism hook install`
+- **GitHub PR integration**: post review findings as PR comments
 - **Caching**: file-based cache with SHA-256 keys and configurable TTL
 - **Large diff handling**: automatic chunking with bounded parallel LLM calls
 
@@ -89,7 +91,7 @@ cat foo.go | prism review snippet --path foo.go --base foo.go.orig
 Run the same review across multiple models and see which findings they agree on:
 
 ```bash
-prism review unstaged --compare anthropic:claude-sonnet-4-20250514,openai:gpt-4o
+prism review unstaged --compare anthropic:claude-sonnet-4-6,openai:gpt-5.2
 ```
 
 Compare mode reports consensus findings (flagged by 2+ models) and unique findings per model.
@@ -122,6 +124,15 @@ prism review range origin/main..HEAD --format sarif --out prism.sarif --fail-on 
 
 ### Pre-Commit Hook
 
+Install a git pre-commit hook that runs prism on staged changes:
+
+```bash
+prism hook install          # installs .git/hooks/pre-commit
+prism hook uninstall        # removes the hook
+```
+
+Or manually:
+
 ```bash
 # .git/hooks/pre-commit
 #!/bin/sh
@@ -146,6 +157,8 @@ prism review staged --fail-on high
 | `prism models doctor` | Validate provider credentials |
 | `prism cache show` | Show cache statistics |
 | `prism cache clear` | Clear cached results |
+| `prism hook install` | Install git pre-commit hook |
+| `prism hook uninstall` | Remove git pre-commit hook |
 | `prism version` | Print version |
 
 ### Review Flags
@@ -154,8 +167,8 @@ All review subcommands accept these flags:
 
 | Flag | Description | Default |
 |------|-------------|---------|
-| `--provider` | LLM provider (`anthropic`, `openai`, `gemini`) | `anthropic` |
-| `--model` | Model name | `claude-sonnet-4-20250514` |
+| `--provider` | LLM provider (`anthropic`, `openai`, `gemini`, `ollama`) | `anthropic` |
+| `--model` | Model name | `claude-sonnet-4-6` |
 | `--compare` | Compare mode: comma-separated `provider:model` pairs | |
 | `--format` | Output format (`text`, `json`, `markdown`, `sarif`) | `text` |
 | `--out` | Output file path | stdout |
@@ -210,7 +223,7 @@ Example `config.json`:
 ```json
 {
   "provider": "anthropic",
-  "model": "claude-sonnet-4-20250514",
+  "model": "claude-sonnet-4-6",
   "compare": [],
   "format": "text",
   "failOn": "none",
@@ -277,24 +290,36 @@ prism review staged --rules rules.json
 
 | Provider | Env Variable | Models |
 |----------|-------------|--------|
-| Anthropic | `ANTHROPIC_API_KEY` | claude-sonnet-4-20250514, claude-haiku-4-5-20251001, claude-opus-4-20250514 |
-| OpenAI | `OPENAI_API_KEY` | gpt-4o, gpt-4o-mini, gpt-4-turbo, o1, o1-mini |
-| Gemini | `GEMINI_API_KEY` | gemini-2.0-flash, gemini-2.0-pro, gemini-1.5-flash, gemini-1.5-pro |
+| Anthropic | `ANTHROPIC_API_KEY` | claude-sonnet-4-6, claude-opus-4-6, claude-haiku-4-5 |
+| OpenAI | `OPENAI_API_KEY` | gpt-5.3-codex, gpt-5.2-codex, gpt-5.2, gpt-4.1-mini, o3-mini |
+| Gemini | `GEMINI_API_KEY` | gemini-3-flash-preview, gemini-3-pro-preview, gemini-2.5-flash, gemini-2.5-pro |
+| Ollama | — | llama3.3, llama3.2, llama3.1, codellama, qwen2.5-coder |
 
 ### Switching Providers
 
 ```bash
 # Via CLI flag
-prism review unstaged --provider openai --model gpt-4o
+prism review unstaged --provider openai --model gpt-5.2
 
 # Via environment
 export PRISM_PROVIDER=gemini
-export PRISM_MODEL=gemini-2.0-flash
+export PRISM_MODEL=gemini-3-flash-preview
 
 # Via config
 prism config set provider openai
-prism config set model gpt-4o
+prism config set model gpt-5.2
 ```
+
+### Local Models with Ollama
+
+Prism supports local models via [Ollama](https://ollama.com/):
+
+```bash
+ollama pull llama3
+prism review unstaged --provider ollama --model llama3
+```
+
+Set `OLLAMA_HOST` to use a custom Ollama endpoint (default: `http://localhost:11434`).
 
 ## Privacy & Security
 
@@ -330,4 +355,4 @@ Prism has a single external dependency: [cobra](https://github.com/spf13/cobra) 
 
 ## License
 
-See [LICENSE](LICENSE) for details.
+MIT — see [LICENSE](LICENSE) for details.
