@@ -21,6 +21,11 @@ func TestSecrets_APIKeys(t *testing.T) {
 		{"OpenAI key", "sk-abcdefghijklmnopqrstuvwxyz"},
 		{"Secret assignment", `password = "my-super-secret-password-123"`},
 		{"Token assignment", `token: "abcdef1234567890abcdef1234567890"`},
+		{"Unquoted password", `password=mysecretvalue123`},
+		{"Unquoted token", `secret=abcdefghijklmnop`},
+		{"Postgres connection", `postgres://admin:s3cret@db.example.com:5432/mydb`},
+		{"MongoDB connection", `mongodb://root:password123@mongo.host:27017/app`},
+		{"Redis connection", `redis://default:secretpass@redis.host:6379`},
 	}
 
 	for _, tt := range tests {

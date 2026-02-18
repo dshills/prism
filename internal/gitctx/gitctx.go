@@ -139,9 +139,14 @@ func Snippet(content, path, lang, base string) (DiffResult, error) {
 			return DiffResult{}, err
 		}
 
-		diff, _ = gitOutput("diff", "--no-index",
+		// git diff --no-index returns exit code 1 when files differ (expected).
+		// Only treat it as an error if the output is empty AND there's an error.
+		diff, err = gitOutput("diff", "--no-index",
 			filepath.Join(aDir, baseName),
 			filepath.Join(bDir, baseName))
+		if err != nil && diff == "" {
+			return DiffResult{}, fmt.Errorf("git diff --no-index: %w", err)
+		}
 	} else {
 		lines := strings.Split(content, "\n")
 		var b strings.Builder

@@ -32,7 +32,6 @@ type rawFinding struct {
 // Run executes a review using the given diff result and configuration.
 func Run(ctx context.Context, diff gitctx.DiffResult, cfg config.Config) (*Report, error) {
 	startTime := time.Now()
-	gitMs := time.Since(startTime).Milliseconds()
 
 	// Redact secrets from diff before sending to provider
 	redactedDiff := diff.Diff
@@ -41,7 +40,7 @@ func Run(ctx context.Context, diff gitctx.DiffResult, cfg config.Config) (*Repor
 	}
 
 	if strings.TrimSpace(redactedDiff) == "" {
-		return emptyReport(diff, gitMs, startTime), nil
+		return emptyReport(diff, startTime), nil
 	}
 
 	// Initialize cache
@@ -154,7 +153,6 @@ func Run(ctx context.Context, diff gitctx.DiffResult, cfg config.Config) (*Repor
 		Summary:  ComputeSummary(findings),
 		Findings: findings,
 		Timing: Timing{
-			GitMs:   gitMs,
 			LLMMs:   llmMs,
 			TotalMs: totalMs,
 		},
@@ -233,7 +231,7 @@ func GenerateRunID() string {
 	return fmt.Sprintf("%x", h[:16])
 }
 
-func emptyReport(diff gitctx.DiffResult, gitMs int64, startTime time.Time) *Report {
+func emptyReport(diff gitctx.DiffResult, startTime time.Time) *Report {
 	return &Report{
 		Tool:    "prism",
 		Version: "1.0",
@@ -250,7 +248,6 @@ func emptyReport(diff gitctx.DiffResult, gitMs int64, startTime time.Time) *Repo
 		Summary:  Summary{},
 		Findings: []Finding{},
 		Timing: Timing{
-			GitMs:   gitMs,
 			TotalMs: time.Since(startTime).Milliseconds(),
 		},
 	}

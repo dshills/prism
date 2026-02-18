@@ -16,10 +16,12 @@ var secretPatterns = []*regexp.Regexp{
 	regexp.MustCompile(`AKIA[0-9A-Z]{16}`),
 	// AWS secret access keys
 	regexp.MustCompile(`(?i)(aws[_-]?secret[_-]?access[_-]?key)\s*[:=]\s*["']?([A-Za-z0-9/+=]{40})["']?`),
-	// Generic secrets/tokens/passwords in assignments
+	// Generic secrets/tokens/passwords in assignments (quoted)
 	regexp.MustCompile(`(?i)(secret|token|password|passwd|credential)\s*[:=]\s*["']([^"']{8,})["']`),
-	// Bearer tokens
-	regexp.MustCompile(`(?i)Bearer\s+[A-Za-z0-9._-]{20,}`),
+	// Generic secrets/tokens/passwords in assignments (unquoted)
+	regexp.MustCompile(`(?i)(secret|token|password|passwd|credential)\s*[:=]\s*([^\s"']{8,})`),
+	// Bearer tokens (including /, +, = in base64 tokens)
+	regexp.MustCompile(`(?i)Bearer\s+[A-Za-z0-9._/+=-]{20,}`),
 	// JWTs (three base64 segments separated by dots)
 	regexp.MustCompile(`eyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}`),
 	// Private key blocks
@@ -32,6 +34,8 @@ var secretPatterns = []*regexp.Regexp{
 	regexp.MustCompile(`sk-ant-[A-Za-z0-9_-]{20,}`),
 	// OpenAI API keys
 	regexp.MustCompile(`sk-[A-Za-z0-9]{20,}`),
+	// Database connection strings with credentials
+	regexp.MustCompile(`(?i)(mongodb|postgres|postgresql|mysql|redis|amqp)://[^\s"']+:[^\s"'@]+@[^\s"']+`),
 	// Generic long hex strings that look like secrets (32+ chars in an assignment)
 	regexp.MustCompile(`(?i)(key|secret|token)\s*[:=]\s*["']?[0-9a-f]{32,}["']?`),
 }

@@ -75,6 +75,9 @@ func buildOverrides() map[string]string {
 	if flagRules != "" {
 		m["rulesFile"] = flagRules
 	}
+	if flagCompare != "" {
+		m["compare"] = flagCompare
+	}
 	return m
 }
 

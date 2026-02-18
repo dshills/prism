@@ -37,7 +37,7 @@ func TestParseModelSpec(t *testing.T) {
 	}
 }
 
-func TestFuzzyMatch_SameFile_OverlappingLines_SameCategory(t *testing.T) {
+func TestFuzzyMatch_SameFile_OverlappingLines_SameCategory_SharedWords(t *testing.T) {
 	a := Finding{
 		Category: CategoryBug,
 		Title:    "Null pointer dereference",
@@ -47,13 +47,33 @@ func TestFuzzyMatch_SameFile_OverlappingLines_SameCategory(t *testing.T) {
 	}
 	b := Finding{
 		Category: CategoryBug,
-		Title:    "Potential nil check missing",
+		Title:    "Potential null pointer issue",
 		Locations: []Location{
 			{Path: "main.go", Lines: LineRange{Start: 12, End: 18}},
 		},
 	}
 	if !fuzzyMatch(a, b) {
-		t.Error("Expected fuzzy match: same file, overlapping lines, same category")
+		t.Error("Expected fuzzy match: same file, overlapping lines, same category, shared word 'pointer'")
+	}
+}
+
+func TestFuzzyMatch_SameCategory_NoSharedWords(t *testing.T) {
+	a := Finding{
+		Category: CategoryBug,
+		Title:    "Memory leak detected",
+		Locations: []Location{
+			{Path: "main.go", Lines: LineRange{Start: 10, End: 15}},
+		},
+	}
+	b := Finding{
+		Category: CategoryBug,
+		Title:    "Unhandled error return",
+		Locations: []Location{
+			{Path: "main.go", Lines: LineRange{Start: 12, End: 18}},
+		},
+	}
+	if fuzzyMatch(a, b) {
+		t.Error("Should not match: same category but no shared title words")
 	}
 }
 

@@ -13,28 +13,30 @@ import (
 type TextWriter struct{}
 
 func (t *TextWriter) Write(w io.Writer, report *review.Report) error {
+	ew := &errWriter{w: w}
+
 	// Summary header
 	total := report.Summary.Counts.High + report.Summary.Counts.Medium + report.Summary.Counts.Low
-	fmt.Fprintf(w, "Prism Code Review — %s mode\n", report.Inputs.Mode)
+	ew.printf("Prism Code Review — %s mode\n", report.Inputs.Mode)
 	if report.Inputs.Range != "" {
-		fmt.Fprintf(w, "Range: %s\n", report.Inputs.Range)
+		ew.printf("Range: %s\n", report.Inputs.Range)
 	}
-	fmt.Fprintf(w, "Repository: %s (branch: %s)\n", report.Repo.Root, report.Repo.Branch)
-	fmt.Fprintln(w, strings.Repeat("─", 60))
-	fmt.Fprintf(w, "Findings: %d total", total)
+	ew.printf("Repository: %s (branch: %s)\n", report.Repo.Root, report.Repo.Branch)
+	ew.println(strings.Repeat("─", 60))
+	ew.printf("Findings: %d total", total)
 	if total > 0 {
-		fmt.Fprintf(w, " (%d high, %d medium, %d low)",
+		ew.printf(" (%d high, %d medium, %d low)",
 			report.Summary.Counts.High,
 			report.Summary.Counts.Medium,
 			report.Summary.Counts.Low,
 		)
 	}
-	fmt.Fprintln(w)
-	fmt.Fprintln(w, strings.Repeat("─", 60))
+	ew.println("")
+	ew.println(strings.Repeat("─", 60))
 
 	if total == 0 {
-		fmt.Fprintln(w, "\nNo issues found. Looks good!")
-		return nil
+		ew.println("\nNo issues found. Looks good!")
+		return ew.err
 	}
 
 	// Group by severity (high first), then by file
@@ -46,8 +48,8 @@ func (t *TextWriter) Write(w io.Writer, report *review.Report) error {
 		}
 
 		label := strings.ToUpper(string(sev))
-		fmt.Fprintf(w, "\n%s %s\n", severityIcon(sev), label)
-		fmt.Fprintln(w, strings.Repeat("─", 40))
+		ew.printf("\n%s %s\n", severityIcon(sev), label)
+		ew.println(strings.Repeat("─", 40))
 
 		// Sort by file path within severity
 		sort.Slice(findings, func(i, j int) bool {
@@ -58,31 +60,51 @@ func (t *TextWriter) Write(w io.Writer, report *review.Report) error {
 
 		for _, f := range findings {
 			loc := primaryLocation(f)
-			fmt.Fprintf(w, "\n  %s:%d-%d  %s\n",
+			ew.printf("\n  %s:%d-%d  %s\n",
 				loc.Path, loc.Lines.Start, loc.Lines.End, f.Title)
-			fmt.Fprintf(w, "  Category: %s | Confidence: %.0f%%\n",
+			ew.printf("  Category: %s | Confidence: %.0f%%\n",
 				f.Category, f.Confidence*100)
 
 			// Message (indented, wrapped)
 			for _, line := range wrapText(f.Message, 70) {
-				fmt.Fprintf(w, "    %s\n", line)
+				ew.printf("    %s\n", line)
 			}
 
 			// Suggestion
 			if f.Suggestion != "" {
-				fmt.Fprintln(w, "  Suggestion:")
+				ew.println("  Suggestion:")
 				for _, line := range wrapText(f.Suggestion, 70) {
-					fmt.Fprintf(w, "    %s\n", line)
+					ew.printf("    %s\n", line)
 				}
 			}
 		}
 	}
 
-	fmt.Fprintf(w, "\n%s\n", strings.Repeat("─", 60))
-	fmt.Fprintf(w, "Completed in %dms (git: %dms, LLM: %dms)\n",
+	ew.printf("\n%s\n", strings.Repeat("─", 60))
+	ew.printf("Completed in %dms (git: %dms, LLM: %dms)\n",
 		report.Timing.TotalMs, report.Timing.GitMs, report.Timing.LLMMs)
 
-	return nil
+	return ew.err
+}
+
+// errWriter wraps an io.Writer and captures the first error.
+type errWriter struct {
+	w   io.Writer
+	err error
+}
+
+func (ew *errWriter) printf(format string, args ...interface{}) {
+	if ew.err != nil {
+		return
+	}
+	_, ew.err = fmt.Fprintf(ew.w, format, args...)
+}
+
+func (ew *errWriter) println(s string) {
+	if ew.err != nil {
+		return
+	}
+	_, ew.err = fmt.Fprintln(ew.w, s)
 }
 
 func groupBySeverity(findings []review.Finding) map[review.Severity][]review.Finding {

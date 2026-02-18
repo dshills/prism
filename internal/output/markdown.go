@@ -1,7 +1,6 @@
 package output
 
 import (
-	"fmt"
 	"io"
 	"sort"
 	"strings"
@@ -13,22 +12,23 @@ import (
 type MarkdownWriter struct{}
 
 func (m *MarkdownWriter) Write(w io.Writer, report *review.Report) error {
+	ew := &errWriter{w: w}
 	total := report.Summary.Counts.High + report.Summary.Counts.Medium + report.Summary.Counts.Low
 
 	// Heading
-	fmt.Fprintf(w, "## Prism Code Review\n\n")
+	ew.printf("## Prism Code Review\n\n")
 
 	// Summary table
-	fmt.Fprintf(w, "| Severity | Count |\n")
-	fmt.Fprintf(w, "|----------|-------|\n")
-	fmt.Fprintf(w, "| High     | %d    |\n", report.Summary.Counts.High)
-	fmt.Fprintf(w, "| Medium   | %d    |\n", report.Summary.Counts.Medium)
-	fmt.Fprintf(w, "| Low      | %d    |\n", report.Summary.Counts.Low)
-	fmt.Fprintf(w, "| **Total** | **%d** |\n\n", total)
+	ew.printf("| Severity | Count |\n")
+	ew.printf("|----------|-------|\n")
+	ew.printf("| High     | %d    |\n", report.Summary.Counts.High)
+	ew.printf("| Medium   | %d    |\n", report.Summary.Counts.Medium)
+	ew.printf("| Low      | %d    |\n", report.Summary.Counts.Low)
+	ew.printf("| **Total** | **%d** |\n\n", total)
 
 	if total == 0 {
-		fmt.Fprintln(w, "No issues found. :white_check_mark:")
-		return nil
+		ew.println("No issues found. :white_check_mark:")
+		return ew.err
 	}
 
 	// Collapsible sections by severity
@@ -42,7 +42,7 @@ func (m *MarkdownWriter) Write(w io.Writer, report *review.Report) error {
 		icon := mdSeverityIcon(sev)
 		label := strings.ToUpper(string(sev))
 
-		fmt.Fprintf(w, "<details>\n<summary>%s %s (%d)</summary>\n\n", icon, label, len(findings))
+		ew.printf("<details>\n<summary>%s %s (%d)</summary>\n\n", icon, label, len(findings))
 
 		// Sort by file path within severity
 		sort.Slice(findings, func(i, j int) bool {
@@ -51,33 +51,33 @@ func (m *MarkdownWriter) Write(w io.Writer, report *review.Report) error {
 
 		for _, f := range findings {
 			loc := mdPrimaryLocation(f)
-			fmt.Fprintf(w, "### %s\n\n", f.Title)
-			fmt.Fprintf(w, "**`%s:%d-%d`** | %s | Confidence: %.0f%%\n\n",
+			ew.printf("### %s\n\n", f.Title)
+			ew.printf("**`%s:%d-%d`** | %s | Confidence: %.0f%%\n\n",
 				loc.Path, loc.Lines.Start, loc.Lines.End, f.Category, f.Confidence*100)
-			fmt.Fprintf(w, "%s\n\n", f.Message)
+			ew.printf("%s\n\n", f.Message)
 
 			if f.Suggestion != "" {
-				fmt.Fprintf(w, "**Suggestion:**\n\n")
+				ew.printf("**Suggestion:**\n\n")
 				// Wrap suggestion in code fence if it looks like code
 				if looksLikeCode(f.Suggestion) {
 					lang := inferLang(loc.Path)
-					fmt.Fprintf(w, "```%s\n%s\n```\n\n", lang, f.Suggestion)
+					ew.printf("```%s\n%s\n```\n\n", lang, f.Suggestion)
 				} else {
-					fmt.Fprintf(w, "> %s\n\n", strings.ReplaceAll(f.Suggestion, "\n", "\n> "))
+					ew.printf("> %s\n\n", strings.ReplaceAll(f.Suggestion, "\n", "\n> "))
 				}
 			}
 
-			fmt.Fprintf(w, "---\n\n")
+			ew.printf("---\n\n")
 		}
 
-		fmt.Fprintf(w, "</details>\n\n")
+		ew.printf("</details>\n\n")
 	}
 
 	// Timing footer
-	fmt.Fprintf(w, "*Reviewed in %dms (git: %dms, LLM: %dms)*\n",
+	ew.printf("*Reviewed in %dms (git: %dms, LLM: %dms)*\n",
 		report.Timing.TotalMs, report.Timing.GitMs, report.Timing.LLMMs)
 
-	return nil
+	return ew.err
 }
 
 func groupFindingsBySeverity(findings []review.Finding) map[review.Severity][]review.Finding {
@@ -159,3 +159,8 @@ func inferLang(path string) string {
 	}
 	return ""
 }
+
+// errWriterMd is provided by text.go's errWriter via same package.
+// The errWriter type is shared across the output package since
+// both text.go and markdown.go are in package output.
+// No need to redeclare it here - it's defined in text.go.

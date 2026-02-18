@@ -132,14 +132,21 @@ func mergeResults(results []compareModelResult, totalLLMMs int64) *CompareResult
 		}
 	}
 
-	// Classify findings
-	consensusSet := make(map[string]bool) // by finding ID to dedup
+	// Classify findings. Use a dedup key based on path+startLine+category to
+	// prevent near-duplicate consensus entries from different models.
+	type dedupKey struct {
+		path      string
+		startLine int
+		category  Category
+	}
+	consensusSeen := make(map[dedupKey]bool)
 	for i, r := range results {
 		for fi, f := range r.findings {
 			key := matchKey{i, fi}
 			if matchCounts[key] > 0 {
-				if !consensusSet[f.ID] {
-					consensusSet[f.ID] = true
+				dk := dedupKey{findingPath(f), findingStartLine(f), f.Category}
+				if !consensusSeen[dk] {
+					consensusSeen[dk] = true
 					cr.Consensus = append(cr.Consensus, f)
 					cr.All = append(cr.All, f)
 				}
@@ -172,11 +179,30 @@ func fuzzyMatch(a, b Finding) bool {
 		return true
 	}
 
-	// Same category + overlapping lines is also a match
-	if a.Category == b.Category {
+	// Same category + overlapping lines + some title word overlap (>0 shared words)
+	if a.Category == b.Category && anyTitleWordOverlap(a.Title, b.Title) {
 		return true
 	}
 
+	return false
+}
+
+// anyTitleWordOverlap returns true if titles share at least one meaningful word.
+func anyTitleWordOverlap(a, b string) bool {
+	wordsA := strings.Fields(strings.ToLower(a))
+	wordsB := strings.Fields(strings.ToLower(b))
+	if len(wordsA) == 0 || len(wordsB) == 0 {
+		return false
+	}
+	setB := make(map[string]bool, len(wordsB))
+	for _, w := range wordsB {
+		setB[w] = true
+	}
+	for _, w := range wordsA {
+		if setB[w] {
+			return true
+		}
+	}
 	return false
 }
 

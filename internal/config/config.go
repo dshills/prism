@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strconv"
+	"strings"
 )
 
 // Config represents the prism configuration.
@@ -185,10 +186,14 @@ func mergeFile(dst *Config, src Config) {
 	if src.Cache.TTLSeconds > 0 {
 		dst.Cache.TTLSeconds = src.Cache.TTLSeconds
 	}
-	// Bool fields from file: only override if the file explicitly set them
-	// Since JSON zero value for bool is false, we can't distinguish unset from false
-	// in a simple merge. We'll trust the file value if the whole struct was loaded.
+	// Bool fields from file: use OR merge since JSON zero value for bool is false
+	// and we can't distinguish unset from explicitly-false in a simple merge.
 	dst.Cache.Enabled = src.Cache.Enabled || dst.Cache.Enabled
+	// For RedactSecrets, the default is true. If the file explicitly loaded (indicated
+	// by having any non-zero field), trust its value. Otherwise keep default.
+	if src.Provider != "" || src.Model != "" || src.Format != "" || len(src.Compare) > 0 {
+		dst.Privacy.RedactSecrets = src.Privacy.RedactSecrets
+	}
 	if len(src.Privacy.RedactPaths) > 0 {
 		dst.Privacy.RedactPaths = src.Privacy.RedactPaths
 	}
@@ -253,9 +258,8 @@ func mergeOverrides(cfg *Config, overrides map[string]string) {
 	if v, ok := overrides["rulesFile"]; ok && v != "" {
 		cfg.RulesFile = v
 	}
-	if v, ok := overrides["out"]; ok && v != "" {
-		// out is handled by CLI, not stored in config
-		_ = v
+	if v, ok := overrides["compare"]; ok && v != "" {
+		cfg.Compare = strings.Split(v, ",")
 	}
 }
 

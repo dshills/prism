@@ -10,9 +10,9 @@ import (
 
 func TestGemini_Review(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Verify the API key is passed as query param
-		if r.URL.Query().Get("key") != "test-key" {
-			t.Error("Missing API key in query params")
+		// Verify the API key is passed as a header
+		if r.Header.Get("x-goog-api-key") != "test-key" {
+			t.Error("Missing API key in x-goog-api-key header")
 		}
 
 		resp := geminiResponse{

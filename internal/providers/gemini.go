@@ -39,7 +39,7 @@ func NewGemini(model string) (*Gemini, error) {
 func (g *Gemini) Name() string { return "gemini" }
 
 func (g *Gemini) Review(ctx context.Context, req ReviewRequest) (ReviewResponse, error) {
-	url := fmt.Sprintf("%s/%s:generateContent?key=%s", geminiAPIURL, g.model, g.apiKey)
+	url := fmt.Sprintf("%s/%s:generateContent", geminiAPIURL, g.model)
 
 	body := geminiRequest{
 		SystemInstruction: &geminiContent{
@@ -74,6 +74,7 @@ func (g *Gemini) Review(ctx context.Context, req ReviewRequest) (ReviewResponse,
 			return fmt.Errorf("creating request: %w", err)
 		}
 		httpReq.Header.Set("Content-Type", "application/json")
+		httpReq.Header.Set("x-goog-api-key", g.apiKey)
 
 		httpResp, err := g.client.Do(httpReq)
 		if err != nil {
