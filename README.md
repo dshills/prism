@@ -349,6 +349,10 @@ Each finding includes:
 - **Suggestion**: actionable fix, often with code
 - **Stable ID**: SHA-256 hash of path + title + start line, consistent across runs
 
+## AI Development Workflows
+
+Prism pairs well with AI coding assistants like Claude Code. Use Prism as a second-opinion reviewer on AI-generated code, with compare mode to get consensus across multiple LLMs. See [WORKFLOWS.md](WORKFLOWS.md) for detailed integration patterns.
+
 ## Dependencies
 
 Prism has a single external dependency: [cobra](https://github.com/spf13/cobra) for CLI parsing. Everything else uses the Go standard library.
