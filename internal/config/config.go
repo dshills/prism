@@ -140,7 +140,9 @@ func Load(overrides map[string]string) (Config, error) {
 		return Config{}, err
 	}
 	mergeFile(&cfg, fileCfg)
-	mergeEnv(&cfg)
+	if err := mergeEnv(&cfg); err != nil {
+		return Config{}, err
+	}
 	mergeOverrides(&cfg, overrides)
 
 	return cfg, nil
@@ -186,12 +188,13 @@ func mergeFile(dst *Config, src Config) {
 	if src.Cache.TTLSeconds > 0 {
 		dst.Cache.TTLSeconds = src.Cache.TTLSeconds
 	}
-	// Bool fields from file: use OR merge since JSON zero value for bool is false
-	// and we can't distinguish unset from explicitly-false in a simple merge.
-	dst.Cache.Enabled = src.Cache.Enabled || dst.Cache.Enabled
-	// For RedactSecrets, the default is true. If the file explicitly loaded (indicated
-	// by having any non-zero field), trust its value. Otherwise keep default.
-	if src.Provider != "" || src.Model != "" || src.Format != "" || len(src.Compare) > 0 {
+	// Bool fields: JSON zero value for bool is false, so we can't distinguish
+	// "unset" from "explicitly false" without custom unmarshaling. Use a heuristic:
+	// if the file had any non-zero field, it was loaded and we trust its booleans.
+	fileLoaded := src.Provider != "" || src.Model != "" || src.Format != "" || len(src.Compare) > 0 ||
+		src.MaxFindings > 0 || src.ContextLines > 0 || src.MaxDiffBytes > 0 || src.Cache.Dir != "" || src.Cache.TTLSeconds > 0
+	if fileLoaded {
+		dst.Cache.Enabled = src.Cache.Enabled
 		dst.Privacy.RedactSecrets = src.Privacy.RedactSecrets
 	}
 	if len(src.Privacy.RedactPaths) > 0 {
@@ -199,7 +202,7 @@ func mergeFile(dst *Config, src Config) {
 	}
 }
 
-func mergeEnv(cfg *Config) {
+func mergeEnv(cfg *Config) error {
 	if v := os.Getenv("PRISM_PROVIDER"); v != "" {
 		cfg.Provider = v
 	}
@@ -213,15 +216,20 @@ func mergeEnv(cfg *Config) {
 		cfg.Format = v
 	}
 	if v := os.Getenv("PRISM_MAX_FINDINGS"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil {
-			cfg.MaxFindings = n
+		n, err := strconv.Atoi(v)
+		if err != nil {
+			return fmt.Errorf("PRISM_MAX_FINDINGS must be an integer, got %q", v)
 		}
+		cfg.MaxFindings = n
 	}
 	if v := os.Getenv("PRISM_CONTEXT_LINES"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil {
-			cfg.ContextLines = n
+		n, err := strconv.Atoi(v)
+		if err != nil {
+			return fmt.Errorf("PRISM_CONTEXT_LINES must be an integer, got %q", v)
 		}
+		cfg.ContextLines = n
 	}
+	return nil
 }
 
 func mergeOverrides(cfg *Config, overrides map[string]string) {

@@ -80,10 +80,13 @@ func (a *Anthropic) Review(ctx context.Context, req ReviewRequest) (ReviewRespon
 		}
 
 		if httpResp.StatusCode == 429 {
-			return &rateLimitError{retryable: true}
+			return &rateLimitError{}
 		}
 		if httpResp.StatusCode == 401 || httpResp.StatusCode == 403 {
 			return &authError{message: string(respBody)}
+		}
+		if httpResp.StatusCode >= 500 {
+			return &serverError{statusCode: httpResp.StatusCode, body: string(respBody)}
 		}
 		if httpResp.StatusCode != 200 {
 			return fmt.Errorf("API error (status %d): %s", httpResp.StatusCode, string(respBody))
@@ -99,6 +102,9 @@ func (a *Anthropic) Review(ctx context.Context, req ReviewRequest) (ReviewRespon
 			if block.Type == "text" {
 				content += block.Text
 			}
+		}
+		if content == "" {
+			return fmt.Errorf("empty text content in API response")
 		}
 
 		resp = ReviewResponse{

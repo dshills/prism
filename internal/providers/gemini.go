@@ -88,10 +88,13 @@ func (g *Gemini) Review(ctx context.Context, req ReviewRequest) (ReviewResponse,
 		}
 
 		if httpResp.StatusCode == 429 {
-			return &rateLimitError{retryable: true}
+			return &rateLimitError{}
 		}
 		if httpResp.StatusCode == 401 || httpResp.StatusCode == 403 {
 			return &authError{message: string(respBody)}
+		}
+		if httpResp.StatusCode >= 500 {
+			return &serverError{statusCode: httpResp.StatusCode, body: string(respBody)}
 		}
 		if httpResp.StatusCode != 200 {
 			return fmt.Errorf("API error (status %d): %s", httpResp.StatusCode, string(respBody))
@@ -109,6 +112,9 @@ func (g *Gemini) Review(ctx context.Context, req ReviewRequest) (ReviewResponse,
 		var content string
 		for _, part := range result.Candidates[0].Content.Parts {
 			content += part.Text
+		}
+		if content == "" {
+			return fmt.Errorf("empty text content in API response")
 		}
 
 		resp = ReviewResponse{

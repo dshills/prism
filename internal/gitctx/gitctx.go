@@ -190,15 +190,16 @@ func buildResult(diff, mode, rangeStr string, opts DiffOptions) (DiffResult, err
 		meta = RepoMeta{}
 	}
 
-	if opts.MaxDiffBytes > 0 && len(diff) > opts.MaxDiffBytes {
-		diff = diff[:opts.MaxDiffBytes] + "\n... (diff truncated at max-diff-bytes limit)\n"
-	}
-
 	files := extractFiles(diff)
 
+	// Filter excludes before truncating so excluded files don't consume the byte budget
 	if len(opts.Exclude) > 0 {
 		diff = filterExcluded(diff, opts.Exclude)
 		files = filterFileList(files, opts.Exclude)
+	}
+
+	if opts.MaxDiffBytes > 0 && len(diff) > opts.MaxDiffBytes {
+		diff = diff[:opts.MaxDiffBytes] + "\n... (diff truncated at max-diff-bytes limit)\n"
 	}
 
 	return DiffResult{

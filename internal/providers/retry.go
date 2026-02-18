@@ -2,14 +2,22 @@ package providers
 
 import (
 	"context"
+	"math/rand"
 	"time"
 )
 
-type rateLimitError struct {
-	retryable bool
-}
+type rateLimitError struct{}
 
 func (e *rateLimitError) Error() string { return "rate limited" }
+
+type serverError struct {
+	statusCode int
+	body       string
+}
+
+func (e *serverError) Error() string {
+	return "server error: " + e.body
+}
 
 type authError struct {
 	message string
@@ -25,6 +33,17 @@ func IsAuthError(err error) bool {
 	return ok
 }
 
+func isRetryable(err error) bool {
+	switch err.(type) {
+	case *rateLimitError:
+		return true
+	case *serverError:
+		return true
+	default:
+		return false
+	}
+}
+
 func retryWithBackoff(ctx context.Context, maxRetries int, fn func() error) error {
 	var lastErr error
 	for attempt := 0; attempt <= maxRetries; attempt++ {
@@ -38,17 +57,19 @@ func retryWithBackoff(ctx context.Context, maxRetries int, fn func() error) erro
 			return lastErr
 		}
 
-		// Only retry rate limit errors
-		if _, ok := lastErr.(*rateLimitError); !ok {
+		// Only retry retryable errors (rate limit, server errors)
+		if !isRetryable(lastErr) {
 			return lastErr
 		}
 
 		if attempt < maxRetries {
-			backoff := time.Duration(1<<uint(attempt)) * time.Second
+			base := time.Duration(1<<uint(attempt)) * time.Second
+			// Add jitter: 50-150% of base to avoid thundering herd
+			jitter := time.Duration(float64(base) * (0.5 + rand.Float64()))
 			select {
 			case <-ctx.Done():
 				return ctx.Err()
-			case <-time.After(backoff):
+			case <-time.After(jitter):
 			}
 		}
 	}

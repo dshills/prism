@@ -55,7 +55,9 @@ func TestMergeEnv(t *testing.T) {
 	os.Setenv("PRISM_CONTEXT_LINES", "5")
 
 	cfg := Default()
-	mergeEnv(&cfg)
+	if err := mergeEnv(&cfg); err != nil {
+		t.Fatalf("mergeEnv error: %v", err)
+	}
 
 	if cfg.Provider != "openai" {
 		t.Errorf("Provider = %q, want %q", cfg.Provider, "openai")
@@ -174,7 +176,9 @@ func TestConfigPrecedence(t *testing.T) {
 	os.Setenv("PRISM_PROVIDER", "openai")
 
 	cfg := Default()
-	mergeEnv(&cfg)
+	if err := mergeEnv(&cfg); err != nil {
+		t.Fatalf("mergeEnv error: %v", err)
+	}
 	if cfg.Provider != "openai" {
 		t.Errorf("After env merge, Provider = %q, want %q", cfg.Provider, "openai")
 	}

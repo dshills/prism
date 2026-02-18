@@ -174,7 +174,12 @@ func parseFindings(content string) ([]Finding, error) {
 			if strings.TrimSpace(lines[end-1]) == "```" {
 				end = end - 1
 			}
-			content = strings.Join(lines[start:end], "\n")
+			if start < end {
+				content = strings.Join(lines[start:end], "\n")
+			} else {
+				// Empty code fence (e.g., "```\n```") — treat as empty array
+				content = "[]"
+			}
 		}
 	}
 
