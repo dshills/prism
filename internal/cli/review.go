@@ -196,6 +196,105 @@ func runCompareMode(ctx context.Context, diff gitctx.DiffResult, cfg config.Conf
 	return report, nil
 }
 
+func runPerCommitReview(revRange string, cfg config.Config) {
+	if flagNoRedact {
+		cfg.Privacy.RedactSecrets = false
+		fmt.Fprintln(os.Stderr, "WARNING: secret redaction is disabled")
+	}
+
+	commits, err := gitctx.ListCommits(revRange, flagMergeBase)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error listing commits: %v\n", err)
+		exitCode = ExitRuntimeError
+		return
+	}
+	if len(commits) == 0 {
+		fmt.Fprintln(os.Stderr, "No commits found in range")
+		return
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	startTime := time.Now()
+
+	var allFindings []review.Finding
+	var totalLLMMs int64
+
+	for i, c := range commits {
+		shortSHA := c.SHA
+		if len(shortSHA) > 7 {
+			shortSHA = shortSHA[:7]
+		}
+		fmt.Fprintf(os.Stderr, "Reviewing commit %d/%d: %s %s\n", i+1, len(commits), shortSHA, c.Subject)
+
+		diff, err := gitctx.Commit(c.SHA, "", buildDiffOpts(cfg))
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "  Skipping (error getting diff): %v\n", err)
+			continue
+		}
+		if strings.TrimSpace(diff.Diff) == "" {
+			fmt.Fprintf(os.Stderr, "  Skipping (empty diff)\n")
+			continue
+		}
+
+		report, err := review.Run(ctx, diff, cfg)
+		if err != nil {
+			if providers.IsAuthError(err) {
+				fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+				exitCode = ExitAuthError
+				return
+			}
+			fmt.Fprintf(os.Stderr, "  Error reviewing commit %s: %v\n", shortSHA, err)
+			continue
+		}
+
+		// Stamp commit SHA on each finding's locations
+		for j := range report.Findings {
+			for k := range report.Findings[j].Locations {
+				report.Findings[j].Locations[k].Commit = shortSHA
+			}
+		}
+
+		allFindings = append(allFindings, report.Findings...)
+		totalLLMMs += report.Timing.LLMMs
+	}
+
+	// Deduplicate and sort
+	allFindings = review.DeduplicateFindings(allFindings)
+	review.SortFindings(allFindings)
+
+	// Apply max findings limit
+	if cfg.MaxFindings > 0 && len(allFindings) > cfg.MaxFindings {
+		allFindings = allFindings[:cfg.MaxFindings]
+	}
+
+	// Build a synthetic DiffResult for the aggregate report
+	meta, _ := gitctx.GetRepoMeta()
+	synthDiff := gitctx.DiffResult{
+		Mode:  "range",
+		Range: revRange,
+		Repo:  meta,
+	}
+
+	report := review.BuildReport(synthDiff, allFindings, totalLLMMs, time.Since(startTime).Milliseconds())
+
+	if err := output.WriteReport(report, cfg.Format, flagOut); err != nil {
+		fmt.Fprintf(os.Stderr, "Error writing output: %v\n", err)
+		exitCode = ExitRuntimeError
+		return
+	}
+
+	// Check fail-on threshold
+	if cfg.FailOn != "none" && cfg.FailOn != "" {
+		for _, f := range report.Findings {
+			if review.MeetsThreshold(f.Severity, cfg.FailOn) {
+				exitCode = ExitFindings
+				return
+			}
+		}
+	}
+}
+
 var reviewCmd = &cobra.Command{
 	Use:   "review",
 	Short: "Review code changes",
@@ -265,7 +364,8 @@ var reviewCommitCmd = &cobra.Command{
 }
 
 var (
-	flagMergeBase bool
+	flagMergeBase  bool
+	flagPerCommit  bool
 )
 
 var reviewRangeCmd = &cobra.Command{
@@ -277,6 +377,18 @@ var reviewRangeCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
+
+		if flagPerCommit && flagCompare != "" {
+			fmt.Fprintln(os.Stderr, "Error: --per-commit and --compare are mutually exclusive")
+			exitCode = ExitUsageError
+			return nil
+		}
+
+		if flagPerCommit {
+			runPerCommitReview(args[0], cfg)
+			return nil
+		}
+
 		diff, err := gitctx.Range(args[0], flagMergeBase, buildDiffOpts(cfg))
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
@@ -445,6 +557,7 @@ func init() {
 
 	// Range-specific flags
 	reviewRangeCmd.Flags().BoolVar(&flagMergeBase, "merge-base", true, "Use merge base for branch comparisons")
+	reviewRangeCmd.Flags().BoolVar(&flagPerCommit, "per-commit", false, "Review each commit separately and aggregate findings")
 
 	// Snippet-specific flags
 	reviewSnippetCmd.Flags().StringVar(&flagSnippetPath, "path", "", "File path (for language detection and messages)")

@@ -131,6 +131,45 @@ func TestMarkdownWriter_WithFindings(t *testing.T) {
 	}
 }
 
+func TestMarkdownWriter_WithCommitSHA(t *testing.T) {
+	findings := []review.Finding{
+		{
+			ID:         "xyz",
+			Severity:   review.SeverityMedium,
+			Category:   review.CategoryBug,
+			Title:      "Possible nil deref",
+			Message:    "Check for nil",
+			Confidence: 0.85,
+			Locations: []review.Location{
+				{
+					Path:   "main.go",
+					Lines:  review.LineRange{Start: 10, End: 12},
+					Commit: "abc1234",
+				},
+			},
+		},
+	}
+	report := &review.Report{
+		Tool:     "prism",
+		Version:  "1.0",
+		Inputs:   review.InputInfo{Mode: "range"},
+		Summary:  review.ComputeSummary(findings),
+		Findings: findings,
+		Timing:   review.Timing{GitMs: 5, LLMMs: 200, TotalMs: 210},
+	}
+
+	var buf bytes.Buffer
+	w := &MarkdownWriter{}
+	if err := w.Write(&buf, report); err != nil {
+		t.Fatalf("Write error: %v", err)
+	}
+
+	out := buf.String()
+	if !strings.Contains(out, "Commit: `abc1234`") {
+		t.Errorf("Output should contain Commit: `abc1234`, got:\n%s", out)
+	}
+}
+
 func TestMarkdownWriter_SuggestionNonCode(t *testing.T) {
 	report := &review.Report{
 		Tool:    "prism",

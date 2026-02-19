@@ -224,7 +224,7 @@ func TestDeduplicateFindings(t *testing.T) {
 		{ID: "b", Title: "Finding B"},
 		{ID: "a", Title: "Finding A duplicate"},
 	}
-	result := deduplicateFindings(findings)
+	result := DeduplicateFindings(findings)
 	if len(result) != 2 {
 		t.Errorf("got %d findings, want 2", len(result))
 	}

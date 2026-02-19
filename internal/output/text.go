@@ -60,8 +60,13 @@ func (t *TextWriter) Write(w io.Writer, report *review.Report) error {
 
 		for _, f := range findings {
 			loc := primaryLocation(f)
-			ew.printf("\n  %s:%d-%d  %s\n",
-				loc.Path, loc.Lines.Start, loc.Lines.End, f.Title)
+			if loc.Commit != "" {
+				ew.printf("\n  %s:%d-%d (%s)  %s\n",
+					loc.Path, loc.Lines.Start, loc.Lines.End, loc.Commit, f.Title)
+			} else {
+				ew.printf("\n  %s:%d-%d  %s\n",
+					loc.Path, loc.Lines.Start, loc.Lines.End, f.Title)
+			}
 			ew.printf("  Category: %s | Confidence: %.0f%%\n",
 				f.Category, f.Confidence*100)
 

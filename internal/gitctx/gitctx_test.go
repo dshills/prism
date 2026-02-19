@@ -443,6 +443,78 @@ func TestCodebase(t *testing.T) {
 	}
 }
 
+func TestListCommits(t *testing.T) {
+	dir := setupTestRepo(t)
+	origDir, _ := os.Getwd()
+	os.Chdir(dir)
+	defer os.Chdir(origDir)
+
+	run := func(args ...string) string {
+		t.Helper()
+		cmd := exec.Command(args[0], args[1:]...)
+		cmd.Dir = dir
+		cmd.Env = append(os.Environ(),
+			"GIT_AUTHOR_NAME=test",
+			"GIT_AUTHOR_EMAIL=test@test.com",
+			"GIT_COMMITTER_NAME=test",
+			"GIT_COMMITTER_EMAIL=test@test.com",
+		)
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("command %v failed: %v\n%s", args, err, out)
+		}
+		return strings.TrimSpace(string(out))
+	}
+
+	// Get the initial commit SHA
+	initSHA := run("git", "rev-parse", "HEAD")
+
+	// Add two more commits
+	os.WriteFile(filepath.Join(dir, "a.go"), []byte("package main\n"), 0o644)
+	run("git", "add", "a.go")
+	run("git", "commit", "-m", "add a.go")
+
+	os.WriteFile(filepath.Join(dir, "b.go"), []byte("package main\n"), 0o644)
+	run("git", "add", "b.go")
+	run("git", "commit", "-m", "add b.go")
+
+	commits, err := ListCommits(initSHA+"..HEAD", false)
+	if err != nil {
+		t.Fatalf("ListCommits error: %v", err)
+	}
+	if len(commits) != 2 {
+		t.Fatalf("got %d commits, want 2", len(commits))
+	}
+
+	// Oldest first
+	if commits[0].Subject != "add a.go" {
+		t.Errorf("commits[0].Subject = %q, want %q", commits[0].Subject, "add a.go")
+	}
+	if commits[1].Subject != "add b.go" {
+		t.Errorf("commits[1].Subject = %q, want %q", commits[1].Subject, "add b.go")
+	}
+
+	// SHAs should be 40-char hex
+	if len(commits[0].SHA) != 40 {
+		t.Errorf("SHA length = %d, want 40", len(commits[0].SHA))
+	}
+}
+
+func TestListCommits_EmptyRange(t *testing.T) {
+	dir := setupTestRepo(t)
+	origDir, _ := os.Getwd()
+	os.Chdir(dir)
+	defer os.Chdir(origDir)
+
+	commits, err := ListCommits("HEAD..HEAD", false)
+	if err != nil {
+		t.Fatalf("ListCommits error: %v", err)
+	}
+	if len(commits) != 0 {
+		t.Errorf("got %d commits for empty range, want 0", len(commits))
+	}
+}
+
 func TestCodebase_MaxDiffBytes(t *testing.T) {
 	dir := setupTestRepo(t)
 	origDir, _ := os.Getwd()

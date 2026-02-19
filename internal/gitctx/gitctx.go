@@ -405,6 +405,53 @@ func Codebase(opts DiffOptions) (DiffResult, error) {
 	}, nil
 }
 
+// CommitInfo holds a commit SHA and its subject line.
+type CommitInfo struct {
+	SHA     string
+	Subject string
+}
+
+// ListCommits returns commits in a revision range, oldest first.
+// If mergeBase is true, ".." is converted to "..." for merge-base comparison.
+func ListCommits(revRange string, mergeBase bool) ([]CommitInfo, error) {
+	listRange := revRange
+	if mergeBase && strings.Contains(revRange, "..") && !strings.Contains(revRange, "...") {
+		listRange = strings.Replace(revRange, "..", "...", 1)
+	}
+
+	// Use --format to get SHA and subject in a single git call.
+	// Output format: "commit <sha>\n<subject>\n" per commit.
+	out, err := gitOutput("rev-list", "--reverse", "--format=%s", listRange)
+	if err != nil {
+		return nil, fmt.Errorf("git rev-list %s: %w", revRange, err)
+	}
+
+	out = strings.TrimSpace(out)
+	if out == "" {
+		return nil, nil
+	}
+
+	lines := strings.Split(out, "\n")
+	var commits []CommitInfo
+	for i := 0; i < len(lines); i++ {
+		line := strings.TrimSpace(lines[i])
+		if !strings.HasPrefix(line, "commit ") {
+			continue
+		}
+		sha := strings.TrimPrefix(line, "commit ")
+		var subject string
+		if i+1 < len(lines) {
+			subject = strings.TrimSpace(lines[i+1])
+			i++ // skip the subject line
+		}
+		commits = append(commits, CommitInfo{
+			SHA:     sha,
+			Subject: subject,
+		})
+	}
+	return commits, nil
+}
+
 func gitOutput(args ...string) (string, error) {
 	cmd := exec.Command("git", args...)
 	out, err := cmd.Output()

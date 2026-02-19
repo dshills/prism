@@ -190,29 +190,16 @@ func RunChunkedWithOptions(ctx context.Context, chunks []Chunk, provider provide
 	}
 
 	// Deduplicate by finding ID
-	allFindings = deduplicateFindings(allFindings)
+	allFindings = DeduplicateFindings(allFindings)
 
 	// Sort by severity (high first), then by file path, then by line
-	sort.Slice(allFindings, func(i, j int) bool {
-		ri := SeverityRank(allFindings[i].Severity)
-		rj := SeverityRank(allFindings[j].Severity)
-		if ri != rj {
-			return ri > rj
-		}
-		pi := findingPath(allFindings[i])
-		pj := findingPath(allFindings[j])
-		if pi != pj {
-			return pi < pj
-		}
-		li := findingStartLine(allFindings[i])
-		lj := findingStartLine(allFindings[j])
-		return li < lj
-	})
+	SortFindings(allFindings)
 
 	return allFindings, totalLLMMs, nil
 }
 
-func deduplicateFindings(findings []Finding) []Finding {
+// DeduplicateFindings removes duplicate findings by ID.
+func DeduplicateFindings(findings []Finding) []Finding {
 	seen := make(map[string]bool)
 	var result []Finding
 	for _, f := range findings {
@@ -222,6 +209,25 @@ func deduplicateFindings(findings []Finding) []Finding {
 		}
 	}
 	return result
+}
+
+// SortFindings sorts findings by severity (high first), then path, then line.
+func SortFindings(findings []Finding) {
+	sort.Slice(findings, func(i, j int) bool {
+		ri := SeverityRank(findings[i].Severity)
+		rj := SeverityRank(findings[j].Severity)
+		if ri != rj {
+			return ri > rj
+		}
+		pi := findingPath(findings[i])
+		pj := findingPath(findings[j])
+		if pi != pj {
+			return pi < pj
+		}
+		li := findingStartLine(findings[i])
+		lj := findingStartLine(findings[j])
+		return li < lj
+	})
 }
 
 func findingPath(f Finding) string {

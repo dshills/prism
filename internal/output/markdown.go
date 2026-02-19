@@ -52,8 +52,13 @@ func (m *MarkdownWriter) Write(w io.Writer, report *review.Report) error {
 		for _, f := range findings {
 			loc := mdPrimaryLocation(f)
 			ew.printf("### %s\n\n", f.Title)
-			ew.printf("**`%s:%d-%d`** | %s | Confidence: %.0f%%\n\n",
-				loc.Path, loc.Lines.Start, loc.Lines.End, f.Category, f.Confidence*100)
+			if loc.Commit != "" {
+				ew.printf("**`%s:%d-%d`** | %s | Confidence: %.0f%% | Commit: `%s`\n\n",
+					loc.Path, loc.Lines.Start, loc.Lines.End, f.Category, f.Confidence*100, loc.Commit)
+			} else {
+				ew.printf("**`%s:%d-%d`** | %s | Confidence: %.0f%%\n\n",
+					loc.Path, loc.Lines.Start, loc.Lines.End, f.Category, f.Confidence*100)
+			}
 			ew.printf("%s\n\n", f.Message)
 
 			if f.Suggestion != "" {
