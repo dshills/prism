@@ -1,5 +1,7 @@
 # Prism
 
+[![Go Reference](https://pkg.go.dev/badge/github.com/dshills/prism.svg)](https://pkg.go.dev/github.com/dshills/prism)
+
 Local-first CLI that reviews code changes using LLM providers and emits findings with deterministic exit codes for CI gating.
 
 Prism is **diff-centric** — it reviews only what changed, not your entire repo. It sends redacted diff hunks to one or more LLMs and returns structured findings with file paths, line numbers, and actionable suggestions. For full-repository audits, Prism also supports a **codebase** mode that reviews all tracked source files.
