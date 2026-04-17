@@ -14,9 +14,9 @@ import (
 
 // CompareResult holds results from multi-model comparison.
 type CompareResult struct {
-	Consensus []Finding // Findings that appeared in >=2 models
+	Consensus []Finding            // Findings that appeared in >=2 models
 	Unique    map[string][]Finding // Unique findings per model (key: "provider:model")
-	All       []Finding // All merged findings for the report
+	All       []Finding            // All merged findings for the report
 	LLMMs     int64
 }
 
@@ -124,24 +124,51 @@ func mergeResults(results []compareModelResult, totalLLMMs int64) *CompareResult
 		return cr
 	}
 
-	// Track which findings from each model match findings from other models
-	// A finding is "consensus" if it appears in >=2 models (by fuzzy match)
+	// Track which findings from each model match findings from other models.
+	// A finding is "consensus" if it appears in >=2 models (by fuzzy match).
 	type matchKey struct {
 		modelIdx   int
 		findingIdx int
 	}
 	matchCounts := make(map[matchKey]int)
 
-	for i := 0; i < len(results); i++ {
-		for fi, f := range results[i].findings {
-			key := matchKey{i, fi}
-			for j := i + 1; j < len(results); j++ {
-				for gj, g := range results[j].findings {
-					if fuzzyMatch(f, g) {
-						matchCounts[key]++
-						matchCounts[matchKey{j, gj}]++
-						break
-					}
+	// Bucket findings by path so fuzzyMatch only runs on candidates that
+	// can possibly match (fuzzyMatch rejects cross-path pairs immediately).
+	// This turns the worst case from O(total²) into O(sum(k²)) per path.
+	// Entries hold only indices to avoid copying Finding structs.
+	type bucketEntry struct {
+		modelIdx   int
+		findingIdx int
+	}
+	byPath := make(map[string][]bucketEntry)
+	for i, r := range results {
+		for fi, f := range r.findings {
+			p := findingPath(f)
+			byPath[p] = append(byPath[p], bucketEntry{i, fi})
+		}
+	}
+
+	// For each ea = bucket[a], scan subsequent entries eb (which are ordered by
+	// modelIdx then findingIdx ascending). Match at most one eb per higher
+	// model — this mirrors the inner `break` in the original nested loop and
+	// preserves its exact counting semantics.
+	matchedModel := make([]bool, len(results))
+	for _, bucket := range byPath {
+		for a := range bucket {
+			ea := bucket[a]
+			clear(matchedModel)
+			for b := a + 1; b < len(bucket); b++ {
+				eb := bucket[b]
+				if eb.modelIdx <= ea.modelIdx {
+					continue
+				}
+				if matchedModel[eb.modelIdx] {
+					continue
+				}
+				if fuzzyMatch(results[ea.modelIdx].findings[ea.findingIdx], results[eb.modelIdx].findings[eb.findingIdx]) {
+					matchCounts[matchKey{ea.modelIdx, ea.findingIdx}]++
+					matchCounts[matchKey{eb.modelIdx, eb.findingIdx}]++
+					matchedModel[eb.modelIdx] = true
 				}
 			}
 		}
