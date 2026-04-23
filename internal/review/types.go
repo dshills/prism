@@ -72,6 +72,20 @@ type Finding struct {
 	Locations  []Location `json:"locations"`
 	Tags       []string   `json:"tags,omitempty"`
 	References []string   `json:"references,omitempty"`
+	// Provider is the LLM vendor that produced this finding
+	// (e.g. "anthropic", "openai"). Empty only for legacy/test data.
+	Provider string `json:"provider,omitempty"`
+	// Model is the concrete model that produced this finding.
+	Model string `json:"model,omitempty"`
+}
+
+// Provenance records that a finding was produced by an LLM and which one.
+// Downstream consumers (SARIF ingest, dashboards, auto-fix agents) use this
+// to distinguish AI-generated findings from deterministic-analyzer findings.
+type Provenance struct {
+	AIGenerated bool   `json:"ai_generated"`
+	Provider    string `json:"provider"`
+	Model       string `json:"model"`
 }
 
 // RepoInfo contains repository metadata.
@@ -119,6 +133,10 @@ type Report struct {
 	Summary  Summary   `json:"summary"`
 	Findings []Finding `json:"findings"`
 	Timing   Timing    `json:"timing"`
+	// Provenance lists every (provider, model) pair that contributed findings
+	// to this report. A single-provider run has one entry; compare mode lists
+	// each model. The underscore prefix marks it as tool-level metadata.
+	Provenance []Provenance `json:"_provenance,omitempty"`
 }
 
 // ComputeSummary calculates the summary from findings.

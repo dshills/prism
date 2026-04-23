@@ -40,22 +40,45 @@ type sarifRun struct {
 }
 
 type sarifTool struct {
-	Driver sarifDriver `json:"driver"`
+	Driver     sarifDriver          `json:"driver"`
+	Extensions []sarifToolComponent `json:"extensions,omitempty"`
 }
 
 type sarifDriver struct {
-	Name           string      `json:"name"`
-	Version        string      `json:"version"`
-	InformationURI string      `json:"informationUri"`
-	Rules          []sarifRule `json:"rules"`
+	Name           string                 `json:"name"`
+	Version        string                 `json:"version"`
+	InformationURI string                 `json:"informationUri"`
+	Rules          []sarifRule            `json:"rules"`
+	Properties     *sarifDriverProperties `json:"properties,omitempty"`
+}
+
+// sarifToolComponent represents a non-driver tool component, used here to
+// record each LLM that produced findings. GitHub code scanning and other
+// SARIF consumers expose extensions as part of the tool identity.
+type sarifToolComponent struct {
+	Name           string                    `json:"name"`
+	Organization   string                    `json:"organization,omitempty"`
+	Version        string                    `json:"version,omitempty"`
+	InformationURI string                    `json:"informationUri,omitempty"`
+	Properties     *sarifExtensionProperties `json:"properties,omitempty"`
+}
+
+type sarifDriverProperties struct {
+	Provenance []review.Provenance `json:"_provenance"`
+}
+
+type sarifExtensionProperties struct {
+	AIGenerated bool   `json:"ai_generated"`
+	Provider    string `json:"provider"`
+	Model       string `json:"model"`
 }
 
 type sarifRule struct {
 	ID               string              `json:"id"`
 	Name             string              `json:"name"`
 	ShortDescription sarifMessage        `json:"shortDescription"`
-	DefaultConfig    sarifDefaultConfig   `json:"defaultConfiguration"`
-	Properties       sarifRuleProperties  `json:"properties,omitempty"`
+	DefaultConfig    sarifDefaultConfig  `json:"defaultConfiguration"`
+	Properties       sarifRuleProperties `json:"properties,omitempty"`
 }
 
 type sarifDefaultConfig struct {
@@ -67,11 +90,22 @@ type sarifRuleProperties struct {
 }
 
 type sarifResult struct {
-	RuleID    string           `json:"ruleId"`
-	Level     string           `json:"level"`
-	Message   sarifMessage     `json:"message"`
-	Locations []sarifLocation  `json:"locations,omitempty"`
-	Fixes     []sarifFix       `json:"fixes,omitempty"`
+	RuleID     string                 `json:"ruleId"`
+	Level      string                 `json:"level"`
+	Message    sarifMessage           `json:"message"`
+	Locations  []sarifLocation        `json:"locations,omitempty"`
+	Fixes      []sarifFix             `json:"fixes,omitempty"`
+	Properties *sarifResultProperties `json:"properties,omitempty"`
+}
+
+// sarifResultProperties carries per-finding provenance. Consumers link a
+// result to its producing extension by matching (provider, model) against
+// tool.extensions[].name — no custom index is emitted, keeping the shape
+// compatible with standard SARIF ingest.
+type sarifResultProperties struct {
+	AIGenerated bool   `json:"ai_generated"`
+	Provider    string `json:"provider,omitempty"`
+	Model       string `json:"model,omitempty"`
 }
 
 type sarifMessage struct {
@@ -142,6 +176,14 @@ func buildSARIF(report *review.Report) sarifLog {
 			})
 		}
 
+		if f.Provider != "" || f.Model != "" {
+			result.Properties = &sarifResultProperties{
+				AIGenerated: true,
+				Provider:    f.Provider,
+				Model:       f.Model,
+			}
+		}
+
 		results = append(results, result)
 	}
 
@@ -156,23 +198,66 @@ func buildSARIF(report *review.Report) sarifLog {
 		}
 	}
 
+	driver := sarifDriver{
+		Name:           "prism",
+		Version:        report.Version,
+		InformationURI: "https://github.com/dshills/prism",
+		Rules:          rules,
+	}
+	if len(report.Provenance) > 0 {
+		driver.Properties = &sarifDriverProperties{Provenance: report.Provenance}
+	}
+
+	tool := sarifTool{Driver: driver}
+	tool.Extensions = buildExtensions(report.Provenance, report.Findings)
+
 	return sarifLog{
 		Version: "2.1.0",
 		Schema:  "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/main/sarif-2.1/schema/sarif-schema-2.1.0.json",
 		Runs: []sarifRun{
 			{
-				Tool: sarifTool{
-					Driver: sarifDriver{
-						Name:           "prism",
-						Version:        report.Version,
-						InformationURI: "https://github.com/dshills/prism",
-						Rules:          rules,
-					},
-				},
+				Tool:    tool,
 				Results: results,
 			},
 		},
 	}
+}
+
+// buildExtensions emits one tool component per unique (provider, model),
+// preferring the order of report.Provenance (which enumerates every reviewer
+// — even zero-finding ones in compare mode) and falling back to order of
+// appearance in findings. Consumers link results to extensions by matching
+// result.properties.{provider, model} against tool.extensions[].name.
+func buildExtensions(provenance []review.Provenance, findings []review.Finding) []sarifToolComponent {
+	seen := make(map[string]bool)
+	var exts []sarifToolComponent
+	add := func(provider, model string) {
+		if provider == "" && model == "" {
+			return
+		}
+		key := provider + "\x00" + model
+		if seen[key] {
+			return
+		}
+		seen[key] = true
+		exts = append(exts, sarifToolComponent{
+			Name:         provider + "/" + model,
+			Organization: provider,
+			Version:      model,
+			Properties: &sarifExtensionProperties{
+				AIGenerated: true,
+				Provider:    provider,
+				Model:       model,
+			},
+		})
+	}
+	for _, p := range provenance {
+		add(p.Provider, p.Model)
+	}
+	for _, f := range findings {
+		add(f.Provider, f.Model)
+	}
+	return exts
 }
 
 // severityToLevel maps prism severity to SARIF level.

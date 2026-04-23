@@ -17,6 +17,11 @@ type ReviewRequest struct {
 type ReviewResponse struct {
 	Content    string
 	TokensUsed int
+	// Provider identifies the LLM vendor that produced this response
+	// (e.g. "anthropic", "openai", "gemini", "ollama").
+	Provider string
+	// Model identifies the concrete model used (e.g. "claude-opus-4-5").
+	Model string
 }
 
 // Reviewer is the provider abstraction interface.

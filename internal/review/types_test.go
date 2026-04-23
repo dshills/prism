@@ -81,3 +81,45 @@ func TestComputeSummary_Empty(t *testing.T) {
 		t.Errorf("HighestSeverity = %q, want empty", s.HighestSeverity)
 	}
 }
+
+func TestCollectProvenance(t *testing.T) {
+	findings := []Finding{
+		{Provider: "anthropic", Model: "claude-opus-4-5"},
+		{Provider: "anthropic", Model: "claude-opus-4-5"},
+		{Provider: "openai", Model: "gpt-5.2"},
+		{}, // no provenance — must be skipped
+	}
+	got := CollectProvenance(findings)
+	if len(got) != 2 {
+		t.Fatalf("len = %d, want 2", len(got))
+	}
+	if got[0].Provider != "anthropic" || got[0].Model != "claude-opus-4-5" || !got[0].AIGenerated {
+		t.Errorf("got[0] = %+v", got[0])
+	}
+	if got[1].Provider != "openai" || got[1].Model != "gpt-5.2" || !got[1].AIGenerated {
+		t.Errorf("got[1] = %+v", got[1])
+	}
+}
+
+func TestCollectProvenance_Empty(t *testing.T) {
+	if got := CollectProvenance(nil); got != nil {
+		t.Errorf("Expected nil for empty findings, got %+v", got)
+	}
+	if got := CollectProvenance([]Finding{{}}); got != nil {
+		t.Errorf("Expected nil when no finding has provenance, got %+v", got)
+	}
+}
+
+func TestStampProvenance(t *testing.T) {
+	findings := []Finding{
+		{}, // empty
+		{Provider: "existing", Model: "preserved"}, // must not be overwritten
+	}
+	stamped := stampProvenance(findings, "new-provider", "new-model")
+	if stamped[0].Provider != "new-provider" || stamped[0].Model != "new-model" {
+		t.Errorf("stamped[0] = %+v; expected new-provider/new-model", stamped[0])
+	}
+	if stamped[1].Provider != "existing" || stamped[1].Model != "preserved" {
+		t.Errorf("stamped[1] = %+v; existing provenance should be preserved", stamped[1])
+	}
+}

@@ -15,8 +15,9 @@ func (m *MarkdownWriter) Write(w io.Writer, report *review.Report) error {
 	ew := &errWriter{w: w}
 	total := report.Summary.Counts.High + report.Summary.Counts.Medium + report.Summary.Counts.Low
 
-	// Heading
-	ew.printf("## Prism Code Review\n\n")
+	// Heading — surface AI provenance so PR readers can distinguish these
+	// findings from deterministic-analyzer output at a glance.
+	ew.printf("## Prism Code Review%s\n\n", provenanceSuffix(report.Provenance))
 
 	// Summary table
 	ew.printf("| Severity | Count |\n")
@@ -83,6 +84,30 @@ func (m *MarkdownWriter) Write(w io.Writer, report *review.Report) error {
 		report.Timing.TotalMs, report.Timing.GitMs, report.Timing.LLMMs)
 
 	return ew.err
+}
+
+// provenanceSuffix formats provenance for the markdown heading.
+// Returns an empty string when no provenance is recorded (legacy reports,
+// empty diffs) so the heading stays clean.
+func provenanceSuffix(provenance []review.Provenance) string {
+	if len(provenance) == 0 {
+		return ""
+	}
+	parts := make([]string, 0, len(provenance))
+	for _, p := range provenance {
+		switch {
+		case p.Provider != "" && p.Model != "":
+			parts = append(parts, p.Provider+"/"+p.Model)
+		case p.Model != "":
+			parts = append(parts, p.Model)
+		case p.Provider != "":
+			parts = append(parts, p.Provider)
+		}
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	return " (AI-generated: " + strings.Join(parts, ", ") + ")"
 }
 
 func groupFindingsBySeverity(findings []review.Finding) map[review.Severity][]review.Finding {

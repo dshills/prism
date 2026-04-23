@@ -10,7 +10,7 @@ Prism is **diff-centric** — it reviews only what changed, not your entire repo
 
 - **6 review modes**: unstaged, staged, commit, range, snippet, and full codebase
 - **4 LLM providers**: Anthropic, OpenAI, Google Gemini, and Ollama/LMStudio (local)
-- **4 output formats**: text, JSON, markdown (PR-comment-ready), and SARIF v2.1.0
+- **4 output formats**: text, JSON, markdown (PR-comment-ready), and SARIF v2.1.0 — all carry AI provenance (provider/model per finding plus a top-level `_provenance` list) so downstream dashboards can distinguish AI findings from deterministic-analyzer output
 - **Multi-model compare mode**: run multiple models in parallel and see consensus vs. unique findings
 - **Secret redaction**: API keys, JWTs, private keys, and database credentials are automatically replaced with `[REDACTED]` before being sent to any provider
 - **Rules packs**: customize severity overrides, focus areas, and required checks

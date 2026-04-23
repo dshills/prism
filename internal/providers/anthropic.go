@@ -110,6 +110,8 @@ func (a *Anthropic) Review(ctx context.Context, req ReviewRequest) (ReviewRespon
 		resp = ReviewResponse{
 			Content:    content,
 			TokensUsed: result.Usage.InputTokens + result.Usage.OutputTokens,
+			Provider:   a.Name(),
+			Model:      a.model,
 		}
 		return nil
 	})

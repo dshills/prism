@@ -120,6 +120,8 @@ func (g *Gemini) Review(ctx context.Context, req ReviewRequest) (ReviewResponse,
 		resp = ReviewResponse{
 			Content:    content,
 			TokensUsed: result.UsageMetadata.TotalTokenCount,
+			Provider:   g.Name(),
+			Model:      g.model,
 		}
 		return nil
 	})

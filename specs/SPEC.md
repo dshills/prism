@@ -212,19 +212,26 @@ config.json example:
         }
       ],
       "tags": ["go", "sql", "n+1", "race-condition"],
-      "references": ["optional urls or docs names"]
+      "references": ["optional urls or docs names"],
+      "provider": "anthropic",
+      "model": "claude-opus-4-5"
     }
   ],
   "timing": {
     "gitMs": 12,
     "llmMs": 1530,
     "totalMs": 1700
-  }
+  },
+  "_provenance": [
+    { "ai_generated": true, "provider": "anthropic", "model": "claude-opus-4-5" }
+  ]
 }
 
 Notes:
 	•	id should be stable-ish (hash of path + title + hunk context) so CI diffs are sane.
 	•	confidence is an estimate; used only for sorting/filters.
+	•	Every finding carries provider and model identifying the LLM that produced it. In compare mode, different findings may have different values.
+	•	_provenance is a top-level list of every (provider, model) that contributed to the run. Single-model runs have one entry; compare mode has one entry per compared model (including zero-finding models). The underscore prefix marks it as tool-level metadata and keeps downstream JSON consumers that iterate known fields unaffected.
 
 6.2 Text format
 
@@ -236,7 +243,8 @@ Human friendly:
 6.3 Markdown format
 
 For PR comments:
-	•	A heading, summary table
+	•	A heading that includes AI provenance: ## Prism Code Review (AI-generated: anthropic/claude-opus-4-5). Compare mode lists each model comma-separated. Heading drops the suffix only when no provenance is recorded.
+	•	Summary table
 	•	Collapsible sections by severity
 	•	Code fences for suggestions
 
@@ -246,6 +254,9 @@ Map findings to SARIF results with:
 	•	severity -> level (note/warning/error)
 	•	location mapping using artifactLocation.uri + region startLine/endLine
 	•	ruleId derived from category/title hash
+	•	tool.driver.properties._provenance: the same list emitted in the JSON format — every (provider, model) that contributed.
+	•	tool.extensions[]: one entry per unique (provider, model), named provider/model with organization=provider, version=model, and properties.{ai_generated, provider, model}. Consumers link a result to its producing extension by matching properties.{provider, model} against the extension's name.
+	•	result.properties.{ai_generated: true, provider, model} on every finding. Lets SARIF ingestors (GitHub code scanning, SAST dashboards) distinguish AI-generated findings from deterministic-analyzer findings and route them appropriately.
 
 6.5 Exit codes
 

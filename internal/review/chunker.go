@@ -172,8 +172,10 @@ func RunChunkedWithOptions(ctx context.Context, chunks []Chunk, provider provide
 					results[i] = result{index: i, err: fmt.Errorf("chunk %d validation after repair: %w", i, err)}
 					return
 				}
+				resp = resp2
 			}
 
+			findings = stampProvenance(findings, resp.Provider, resp.Model)
 			results[i] = result{index: i, findings: findings}
 		}(i, chunk)
 	}

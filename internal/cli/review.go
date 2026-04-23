@@ -183,6 +183,9 @@ func runCompareMode(ctx context.Context, diff gitctx.DiffResult, cfg config.Conf
 	}
 
 	report := review.BuildReport(diff, findings, cr.LLMMs, time.Since(startTime).Milliseconds())
+	// Overwrite provenance to enumerate every compared model, even ones that
+	// produced zero findings — the list represents who reviewed, not who reported.
+	report.Provenance = compareProvenance(models)
 
 	// Print compare summary to stderr
 	fmt.Fprintf(os.Stderr, "Compare mode: %d models, %d consensus findings, %d total\n",
@@ -194,6 +197,25 @@ func runCompareMode(ctx context.Context, diff gitctx.DiffResult, cfg config.Conf
 	}
 
 	return report, nil
+}
+
+// compareProvenance builds a Provenance list from compared "provider:model"
+// specs. Invalid specs are skipped silently since they would have errored
+// upstream in RunCompareWithOptions.
+func compareProvenance(models []string) []review.Provenance {
+	out := make([]review.Provenance, 0, len(models))
+	for _, spec := range models {
+		parts := strings.SplitN(spec, ":", 2)
+		if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
+			continue
+		}
+		out = append(out, review.Provenance{
+			AIGenerated: true,
+			Provider:    parts[0],
+			Model:       parts[1],
+		})
+	}
+	return out
 }
 
 func runPerCommitReview(revRange string, cfg config.Config) {
@@ -364,8 +386,8 @@ var reviewCommitCmd = &cobra.Command{
 }
 
 var (
-	flagMergeBase  bool
-	flagPerCommit  bool
+	flagMergeBase bool
+	flagPerCommit bool
 )
 
 var reviewRangeCmd = &cobra.Command{

@@ -97,6 +97,7 @@ func RunCompareWithOptions(ctx context.Context, diff string, files []string, mod
 				return
 			}
 
+			findings = stampProvenance(findings, resp.Provider, resp.Model)
 			results[i] = compareModelResult{label: spec, findings: findings}
 		}(i, modelSpec)
 	}

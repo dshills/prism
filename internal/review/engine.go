@@ -15,7 +15,11 @@ import (
 	"github.com/dshills/prism/internal/redact"
 )
 
-// rawFinding is the JSON structure returned by the LLM.
+// rawFinding is the JSON structure returned by the LLM and also used for
+// cache storage. Provider/Model are set only on the cache-storage path so
+// cached findings round-trip their provenance; LLM responses won't populate
+// them (the model doesn't know its own identity) — the engine stamps those
+// from the provider after parsing.
 type rawFinding struct {
 	Severity   string   `json:"severity"`
 	Category   string   `json:"category"`
@@ -27,6 +31,8 @@ type rawFinding struct {
 	StartLine  int      `json:"startLine"`
 	EndLine    int      `json:"endLine"`
 	Tags       []string `json:"tags"`
+	Provider   string   `json:"provider,omitempty"`
+	Model      string   `json:"model,omitempty"`
 }
 
 // reviewOpts controls differences between Run() and RunCodebase() pipelines.
@@ -71,6 +77,10 @@ func reviewPipeline(ctx context.Context, diff gitctx.DiffResult, cfg config.Conf
 		if err != nil {
 			// Cache entry is corrupt, fall through to LLM
 			findings = nil
+		} else {
+			// Legacy cache entries may lack provenance; stamp from the cache
+			// key's (provider, model) since the key itself fixes them.
+			findings = stampProvenance(findings, cfg.Provider, cfg.Model)
 		}
 	}
 
@@ -135,7 +145,9 @@ func reviewPipeline(ctx context.Context, diff gitctx.DiffResult, cfg config.Conf
 				if err != nil {
 					return nil, fmt.Errorf("response validation failed after repair: %w", err)
 				}
+				resp = resp2
 			}
+			findings = stampProvenance(findings, resp.Provider, resp.Model)
 		}
 
 		// Store in cache as rawFinding format so parseFindings can read it back
@@ -192,6 +204,8 @@ func parseFindings(content string) ([]Finding, error) {
 			Suggestion: r.Suggestion,
 			Confidence: r.Confidence,
 			Tags:       r.Tags,
+			Provider:   r.Provider,
+			Model:      r.Model,
 			Locations: []Location{
 				{
 					Path: r.Path,
@@ -209,6 +223,21 @@ func parseFindings(content string) ([]Finding, error) {
 	return findings, nil
 }
 
+// stampProvenance sets Provider and Model on every finding that doesn't
+// already have them. Used after parsing fresh LLM responses; cached findings
+// retain whatever the cache wrote.
+func stampProvenance(findings []Finding, provider, model string) []Finding {
+	for i := range findings {
+		if findings[i].Provider == "" {
+			findings[i].Provider = provider
+		}
+		if findings[i].Model == "" {
+			findings[i].Model = model
+		}
+	}
+	return findings
+}
+
 // findingsToRaw converts parsed Findings back to rawFinding format for cache storage.
 func findingsToRaw(findings []Finding) []rawFinding {
 	raw := make([]rawFinding, len(findings))
@@ -221,6 +250,8 @@ func findingsToRaw(findings []Finding) []rawFinding {
 			Suggestion: f.Suggestion,
 			Confidence: f.Confidence,
 			Tags:       f.Tags,
+			Provider:   f.Provider,
+			Model:      f.Model,
 		}
 		if len(f.Locations) > 0 {
 			r.Path = f.Locations[0].Path
@@ -271,6 +302,7 @@ func RunCodebase(ctx context.Context, diff gitctx.DiffResult, cfg CodebaseConfig
 }
 
 // BuildReport constructs a Report from diff metadata, findings, and timing info.
+// Report.Provenance is derived from the per-finding Provider/Model pairs.
 func BuildReport(diff gitctx.DiffResult, findings []Finding, llmMs, totalMs int64) *Report {
 	if findings == nil {
 		findings = []Finding{}
@@ -294,7 +326,31 @@ func BuildReport(diff gitctx.DiffResult, findings []Finding, llmMs, totalMs int6
 			LLMMs:   llmMs,
 			TotalMs: totalMs,
 		},
+		Provenance: CollectProvenance(findings),
 	}
+}
+
+// CollectProvenance returns the deduplicated, stably ordered list of
+// (provider, model) pairs across all findings. Order follows first appearance.
+func CollectProvenance(findings []Finding) []Provenance {
+	seen := make(map[string]bool)
+	var out []Provenance
+	for _, f := range findings {
+		if f.Provider == "" && f.Model == "" {
+			continue
+		}
+		key := f.Provider + "\x00" + f.Model
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		out = append(out, Provenance{
+			AIGenerated: true,
+			Provider:    f.Provider,
+			Model:       f.Model,
+		})
+	}
+	return out
 }
 
 func emptyReport(diff gitctx.DiffResult, startTime time.Time) *Report {

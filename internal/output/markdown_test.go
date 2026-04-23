@@ -243,6 +243,72 @@ func TestInferLang(t *testing.T) {
 	}
 }
 
+func TestMarkdownWriter_ProvenanceHeader(t *testing.T) {
+	report := &review.Report{
+		Tool:     "prism",
+		Version:  "1.0",
+		Inputs:   review.InputInfo{Mode: "unstaged"},
+		Findings: []review.Finding{},
+		Summary:  review.ComputeSummary(nil),
+		Provenance: []review.Provenance{
+			{AIGenerated: true, Provider: "anthropic", Model: "claude-opus-4-5"},
+		},
+	}
+	var buf bytes.Buffer
+	w := &MarkdownWriter{}
+	if err := w.Write(&buf, report); err != nil {
+		t.Fatalf("Write error: %v", err)
+	}
+	if !strings.Contains(buf.String(), "## Prism Code Review (AI-generated: anthropic/claude-opus-4-5)") {
+		t.Errorf("Missing AI-generated heading suffix, got:\n%s", buf.String())
+	}
+}
+
+func TestMarkdownWriter_ProvenanceHeader_Compare(t *testing.T) {
+	report := &review.Report{
+		Tool:     "prism",
+		Version:  "1.0",
+		Inputs:   review.InputInfo{Mode: "staged"},
+		Findings: []review.Finding{},
+		Summary:  review.ComputeSummary(nil),
+		Provenance: []review.Provenance{
+			{AIGenerated: true, Provider: "anthropic", Model: "claude-opus-4-5"},
+			{AIGenerated: true, Provider: "openai", Model: "gpt-5.2"},
+		},
+	}
+	var buf bytes.Buffer
+	w := &MarkdownWriter{}
+	if err := w.Write(&buf, report); err != nil {
+		t.Fatalf("Write error: %v", err)
+	}
+	if !strings.Contains(buf.String(), "anthropic/claude-opus-4-5, openai/gpt-5.2") {
+		t.Errorf("Missing both models in heading, got:\n%s", buf.String())
+	}
+}
+
+func TestMarkdownWriter_NoProvenance(t *testing.T) {
+	// Legacy reports without provenance should still produce a clean header.
+	report := &review.Report{
+		Tool:     "prism",
+		Version:  "1.0",
+		Inputs:   review.InputInfo{Mode: "unstaged"},
+		Findings: []review.Finding{},
+		Summary:  review.ComputeSummary(nil),
+	}
+	var buf bytes.Buffer
+	w := &MarkdownWriter{}
+	if err := w.Write(&buf, report); err != nil {
+		t.Fatalf("Write error: %v", err)
+	}
+	out := buf.String()
+	if !strings.Contains(out, "## Prism Code Review\n") {
+		t.Errorf("Expected bare heading without provenance, got:\n%s", out)
+	}
+	if strings.Contains(out, "AI-generated") {
+		t.Errorf("Expected no AI-generated marker when provenance is empty, got:\n%s", out)
+	}
+}
+
 func TestMdSeverityIcon(t *testing.T) {
 	if mdSeverityIcon(review.SeverityHigh) != ":red_circle:" {
 		t.Error("High severity should be red")

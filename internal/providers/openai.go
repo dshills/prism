@@ -120,6 +120,8 @@ func (o *OpenAI) Review(ctx context.Context, req ReviewRequest) (ReviewResponse,
 		resp = ReviewResponse{
 			Content:    result.Choices[0].Message.Content,
 			TokensUsed: result.Usage.TotalTokens,
+			Provider:   o.Name(),
+			Model:      o.model,
 		}
 		return nil
 	})
