@@ -68,6 +68,36 @@ func TestTextWriter_Provenance(t *testing.T) {
 	}
 }
 
+func TestTextWriter_DuplicateProvenance(t *testing.T) {
+	// provenanceLabel does not deduplicate; callers must supply deduplicated
+	// provenance (as review.CollectProvenance guarantees). This test documents
+	// that duplicates pass through unchanged, keeping text output consistent
+	// with markdown/JSON/SARIF formatters.
+	report := &review.Report{
+		Tool:     "prism",
+		Version:  "1.0",
+		Inputs:   review.InputInfo{Mode: "staged"},
+		Repo:     review.RepoInfo{Root: "/tmp/repo", Branch: "main"},
+		Summary:  review.Summary{},
+		Findings: []review.Finding{},
+		Provenance: []review.Provenance{
+			{Provider: "anthropic", Model: "claude-opus-4-5"},
+			{Provider: "anthropic", Model: "claude-opus-4-5"},
+		},
+	}
+
+	var buf bytes.Buffer
+	w := &TextWriter{}
+	if err := w.Write(&buf, report); err != nil {
+		t.Fatalf("Write error: %v", err)
+	}
+
+	out := buf.String()
+	if strings.Count(out, "anthropic/claude-opus-4-5") != 2 {
+		t.Errorf("Expected duplicate entries to appear twice; got:\n%s", out)
+	}
+}
+
 func TestTextWriter_NoProvenance(t *testing.T) {
 	report := &review.Report{
 		Tool:     "prism",

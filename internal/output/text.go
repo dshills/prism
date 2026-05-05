@@ -151,26 +151,18 @@ func severityIcon(s review.Severity) string {
 }
 
 // provenanceLabel formats a slice of provenance entries into a
-// comma-separated string of unique provider/model pairs for plain-text output.
+// comma-separated string of provider/model pairs for plain-text output.
+// Callers should pass deduplicated provenance (as review.CollectProvenance provides).
 func provenanceLabel(provenance []review.Provenance) string {
-	seen := make(map[string]struct{})
 	parts := make([]string, 0, len(provenance))
 	for _, p := range provenance {
-		var label string
 		switch {
 		case p.Provider != "" && p.Model != "":
-			label = p.Provider + "/" + p.Model
+			parts = append(parts, p.Provider+"/"+p.Model)
 		case p.Model != "":
-			label = p.Model
+			parts = append(parts, p.Model)
 		case p.Provider != "":
-			label = p.Provider
-		}
-		if label == "" {
-			continue
-		}
-		if _, ok := seen[label]; !ok {
-			seen[label] = struct{}{}
-			parts = append(parts, label)
+			parts = append(parts, p.Provider)
 		}
 	}
 	return strings.Join(parts, ", ")
