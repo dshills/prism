@@ -49,6 +49,6 @@ var versionCmd = &cobra.Command{
 	Use:   "version",
 	Short: "Print prism version",
 	Run: func(cmd *cobra.Command, args []string) {
-		fmt.Fprintf(os.Stdout, "prism version %s\n", version)
+		_, _ = fmt.Fprintf(os.Stdout, "prism version %s\n", version)
 	},
 }

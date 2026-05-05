@@ -167,8 +167,8 @@ func mergeResults(results []compareModelResult, totalLLMMs int64) *CompareResult
 					continue
 				}
 				if fuzzyMatch(results[ea.modelIdx].findings[ea.findingIdx], results[eb.modelIdx].findings[eb.findingIdx]) {
-					matchCounts[matchKey{ea.modelIdx, ea.findingIdx}]++
-					matchCounts[matchKey{eb.modelIdx, eb.findingIdx}]++
+					matchCounts[matchKey(ea)]++
+					matchCounts[matchKey(eb)]++
 					matchedModel[eb.modelIdx] = true
 				}
 			}

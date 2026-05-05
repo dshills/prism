@@ -20,7 +20,7 @@ func TestOpenAI_Review(t *testing.T) {
 			},
 			Usage: openaiUsage{TotalTokens: 50},
 		}
-		json.NewEncoder(w).Encode(resp)
+		_ = json.NewEncoder(w).Encode(resp)
 	}))
 	defer server.Close()
 
@@ -53,7 +53,7 @@ func TestOpenAI_RateLimit(t *testing.T) {
 		attempts++
 		if attempts <= 2 {
 			w.WriteHeader(429)
-			w.Write([]byte(`{"error":"rate limited"}`))
+			_, _ = w.Write([]byte(`{"error":"rate limited"}`))
 			return
 		}
 		resp := openaiResponse{
@@ -61,7 +61,7 @@ func TestOpenAI_RateLimit(t *testing.T) {
 				{Message: openaiMessage{Role: "assistant", Content: "[]"}},
 			},
 		}
-		json.NewEncoder(w).Encode(resp)
+		_ = json.NewEncoder(w).Encode(resp)
 	}))
 	defer server.Close()
 

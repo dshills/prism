@@ -22,7 +22,7 @@ func TestGetPRDiff(t *testing.T) {
 		if r.URL.Path != "/repos/owner/repo/pulls/42" {
 			t.Errorf("Path = %q, want %q", r.URL.Path, "/repos/owner/repo/pulls/42")
 		}
-		w.Write([]byte("diff --git a/file.go b/file.go\n"))
+		_, _ = w.Write([]byte("diff --git a/file.go b/file.go\n"))
 	}))
 	defer server.Close()
 
@@ -44,7 +44,7 @@ func TestGetPRDiff(t *testing.T) {
 func TestGetPRDiff_404(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(404)
-		w.Write([]byte(`{"message":"Not Found"}`))
+		_, _ = w.Write([]byte(`{"message":"Not Found"}`))
 	}))
 	defer server.Close()
 
@@ -66,7 +66,7 @@ func TestGetPRDiff_404(t *testing.T) {
 func TestGetPRDiff_401(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(401)
-		w.Write([]byte(`{"message":"Bad credentials"}`))
+		_, _ = w.Write([]byte(`{"message":"Bad credentials"}`))
 	}))
 	defer server.Close()
 
@@ -94,7 +94,7 @@ func TestGetPRFiles(t *testing.T) {
 			{Filename: "main.go"},
 			{Filename: "util.go"},
 		}
-		json.NewEncoder(w).Encode(files)
+		_ = json.NewEncoder(w).Encode(files)
 	}))
 	defer server.Close()
 
@@ -140,7 +140,7 @@ func TestPostReview(t *testing.T) {
 		}
 
 		w.WriteHeader(200)
-		w.Write([]byte(`{"id":1}`))
+		_, _ = w.Write([]byte(`{"id":1}`))
 	}))
 	defer server.Close()
 

@@ -25,7 +25,7 @@ func TestGemini_Review(t *testing.T) {
 			},
 			UsageMetadata: geminiUsage{TotalTokenCount: 75},
 		}
-		json.NewEncoder(w).Encode(resp)
+		_ = json.NewEncoder(w).Encode(resp)
 	}))
 	defer server.Close()
 

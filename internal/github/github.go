@@ -60,7 +60,7 @@ func (c *Client) GetPRDiff(ctx context.Context, owner, repo string, prNumber int
 	if err != nil {
 		return "", fmt.Errorf("fetching PR diff: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -100,7 +100,7 @@ func (c *Client) GetPRFiles(ctx context.Context, owner, repo string, prNumber in
 	if err != nil {
 		return nil, fmt.Errorf("fetching PR files: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -158,7 +158,7 @@ func (c *Client) PostReview(ctx context.Context, owner, repo string, prNumber in
 	if err != nil {
 		return fmt.Errorf("posting review: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -220,10 +220,10 @@ func BuildGitHubReview(findings []review.Finding, diffFiles map[string]bool) Rev
 	// Build summary body
 	var sb strings.Builder
 	sb.WriteString("## Prism Code Review\n\n")
-	sb.WriteString(fmt.Sprintf("| Severity | Count |\n|----------|-------|\n"))
-	sb.WriteString(fmt.Sprintf("| High | %d |\n", high))
-	sb.WriteString(fmt.Sprintf("| Medium | %d |\n", medium))
-	sb.WriteString(fmt.Sprintf("| Low | %d |\n\n", low))
+	sb.WriteString("| Severity | Count |\n|----------|-------|\n")
+	fmt.Fprintf(&sb, "| High | %d |\n", high)
+	fmt.Fprintf(&sb, "| Medium | %d |\n", medium)
+	fmt.Fprintf(&sb, "| Low | %d |\n\n", low)
 
 	if len(bodyComments) > 0 {
 		sb.WriteString("### General Findings\n\n")
@@ -242,19 +242,19 @@ func BuildGitHubReview(findings []review.Finding, diffFiles map[string]bool) Rev
 
 func formatInlineComment(f review.Finding) string {
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("**%s** (%s, %s, confidence: %.0f%%)\n\n", f.Title, f.Severity, f.Category, f.Confidence*100))
+	fmt.Fprintf(&sb, "**%s** (%s, %s, confidence: %.0f%%)\n\n", f.Title, f.Severity, f.Category, f.Confidence*100)
 	sb.WriteString(f.Message)
 	if f.Suggestion != "" {
-		sb.WriteString(fmt.Sprintf("\n\n**Suggestion:**\n```\n%s\n```", f.Suggestion))
+		fmt.Fprintf(&sb, "\n\n**Suggestion:**\n```\n%s\n```", f.Suggestion)
 	}
 	return sb.String()
 }
 
 func formatFindingBody(f review.Finding) string {
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("- **%s** (%s, %s): %s", f.Title, f.Severity, f.Category, f.Message))
+	fmt.Fprintf(&sb, "- **%s** (%s, %s): %s", f.Title, f.Severity, f.Category, f.Message)
 	if f.Suggestion != "" {
-		sb.WriteString(fmt.Sprintf(" — *Suggestion: %s*", f.Suggestion))
+		fmt.Fprintf(&sb, " — *Suggestion: %s*", f.Suggestion)
 	}
 	return sb.String()
 }

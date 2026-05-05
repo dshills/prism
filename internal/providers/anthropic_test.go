@@ -24,7 +24,7 @@ func TestAnthropic_Review(t *testing.T) {
 			},
 			Usage: anthropicUsage{InputTokens: 100, OutputTokens: 10},
 		}
-		json.NewEncoder(w).Encode(resp)
+		_ = json.NewEncoder(w).Encode(resp)
 	}))
 	defer server.Close()
 
@@ -63,7 +63,7 @@ func TestAnthropic_Review(t *testing.T) {
 func TestAnthropic_AuthError(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(401)
-		w.Write([]byte(`{"error":"unauthorized"}`))
+		_, _ = w.Write([]byte(`{"error":"unauthorized"}`))
 	}))
 	defer server.Close()
 

@@ -85,7 +85,7 @@ func (o *OpenAI) Review(ctx context.Context, req ReviewRequest) (ReviewResponse,
 		if err != nil {
 			return fmt.Errorf("sending request: %w", err)
 		}
-		defer httpResp.Body.Close()
+		defer func() { _ = httpResp.Body.Close() }()
 
 		respBody, err := io.ReadAll(httpResp.Body)
 		if err != nil {

@@ -301,10 +301,18 @@ func setupTestRepo(t *testing.T) string {
 	run("git", "checkout", "-b", "main")
 
 	// Create source files
-	os.WriteFile(filepath.Join(dir, "main.go"), []byte("package main\n\nfunc main() {}\n"), 0o644)
-	os.WriteFile(filepath.Join(dir, "util.go"), []byte("package main\n\nfunc helper() {}\n"), 0o644)
-	os.MkdirAll(filepath.Join(dir, "vendor"), 0o755)
-	os.WriteFile(filepath.Join(dir, "vendor", "lib.go"), []byte("package vendor\n"), 0o644)
+	if err := os.WriteFile(filepath.Join(dir, "main.go"), []byte("package main\n\nfunc main() {}\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile main.go: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "util.go"), []byte("package main\n\nfunc helper() {}\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile util.go: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(dir, "vendor"), 0o755); err != nil {
+		t.Fatalf("MkdirAll vendor: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "vendor", "lib.go"), []byte("package vendor\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile vendor/lib.go: %v", err)
+	}
 
 	run("git", "add", "-A")
 	run("git", "commit", "-m", "init")
@@ -315,8 +323,10 @@ func setupTestRepo(t *testing.T) string {
 func TestWalkFiles(t *testing.T) {
 	dir := setupTestRepo(t)
 	origDir, _ := os.Getwd()
-	os.Chdir(dir)
-	defer os.Chdir(origDir)
+	if err := os.Chdir(dir); err != nil {
+		t.Fatalf("Chdir: %v", err)
+	}
+	defer func() { _ = os.Chdir(origDir) }()
 
 	files, err := WalkFiles(DiffOptions{})
 	if err != nil {
@@ -339,8 +349,10 @@ func TestWalkFiles(t *testing.T) {
 func TestWalkFiles_WithInclude(t *testing.T) {
 	dir := setupTestRepo(t)
 	origDir, _ := os.Getwd()
-	os.Chdir(dir)
-	defer os.Chdir(origDir)
+	if err := os.Chdir(dir); err != nil {
+		t.Fatalf("Chdir: %v", err)
+	}
+	defer func() { _ = os.Chdir(origDir) }()
 
 	files, err := WalkFiles(DiffOptions{Include: []string{"*.go"}})
 	if err != nil {
@@ -357,8 +369,10 @@ func TestWalkFiles_WithInclude(t *testing.T) {
 func TestWalkFiles_WithExclude(t *testing.T) {
 	dir := setupTestRepo(t)
 	origDir, _ := os.Getwd()
-	os.Chdir(dir)
-	defer os.Chdir(origDir)
+	if err := os.Chdir(dir); err != nil {
+		t.Fatalf("Chdir: %v", err)
+	}
+	defer func() { _ = os.Chdir(origDir) }()
 
 	files, err := WalkFiles(DiffOptions{Exclude: []string{"vendor/**"}})
 	if err != nil {
@@ -375,8 +389,10 @@ func TestWalkFiles_WithExclude(t *testing.T) {
 func TestCodebase(t *testing.T) {
 	dir := setupTestRepo(t)
 	origDir, _ := os.Getwd()
-	os.Chdir(dir)
-	defer os.Chdir(origDir)
+	if err := os.Chdir(dir); err != nil {
+		t.Fatalf("Chdir: %v", err)
+	}
+	defer func() { _ = os.Chdir(origDir) }()
 
 	result, err := Codebase(DiffOptions{})
 	if err != nil {
@@ -406,8 +422,10 @@ func TestCodebase(t *testing.T) {
 func TestListCommits(t *testing.T) {
 	dir := setupTestRepo(t)
 	origDir, _ := os.Getwd()
-	os.Chdir(dir)
-	defer os.Chdir(origDir)
+	if err := os.Chdir(dir); err != nil {
+		t.Fatalf("Chdir: %v", err)
+	}
+	defer func() { _ = os.Chdir(origDir) }()
 
 	run := func(args ...string) string {
 		t.Helper()
@@ -430,11 +448,15 @@ func TestListCommits(t *testing.T) {
 	initSHA := run("git", "rev-parse", "HEAD")
 
 	// Add two more commits
-	os.WriteFile(filepath.Join(dir, "a.go"), []byte("package main\n"), 0o644)
+	if err := os.WriteFile(filepath.Join(dir, "a.go"), []byte("package main\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile a.go: %v", err)
+	}
 	run("git", "add", "a.go")
 	run("git", "commit", "-m", "add a.go")
 
-	os.WriteFile(filepath.Join(dir, "b.go"), []byte("package main\n"), 0o644)
+	if err := os.WriteFile(filepath.Join(dir, "b.go"), []byte("package main\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile b.go: %v", err)
+	}
 	run("git", "add", "b.go")
 	run("git", "commit", "-m", "add b.go")
 
@@ -463,8 +485,10 @@ func TestListCommits(t *testing.T) {
 func TestListCommits_EmptyRange(t *testing.T) {
 	dir := setupTestRepo(t)
 	origDir, _ := os.Getwd()
-	os.Chdir(dir)
-	defer os.Chdir(origDir)
+	if err := os.Chdir(dir); err != nil {
+		t.Fatalf("Chdir: %v", err)
+	}
+	defer func() { _ = os.Chdir(origDir) }()
 
 	commits, err := ListCommits("HEAD..HEAD", false)
 	if err != nil {
@@ -478,8 +502,10 @@ func TestListCommits_EmptyRange(t *testing.T) {
 func TestCodebase_MaxDiffBytes(t *testing.T) {
 	dir := setupTestRepo(t)
 	origDir, _ := os.Getwd()
-	os.Chdir(dir)
-	defer os.Chdir(origDir)
+	if err := os.Chdir(dir); err != nil {
+		t.Fatalf("Chdir: %v", err)
+	}
+	defer func() { _ = os.Chdir(origDir) }()
 
 	result, err := Codebase(DiffOptions{MaxDiffBytes: 100})
 	if err != nil {

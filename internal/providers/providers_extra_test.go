@@ -54,14 +54,14 @@ func TestAnthropic_ServerError(t *testing.T) {
 		attempts++
 		if attempts <= 2 {
 			w.WriteHeader(500)
-			w.Write([]byte(`{"error":"internal server error"}`))
+			_, _ = w.Write([]byte(`{"error":"internal server error"}`))
 			return
 		}
 		resp := anthropicResponse{
 			Content: []anthropicBlock{{Type: "text", Text: "[]"}},
 			Usage:   anthropicUsage{InputTokens: 10, OutputTokens: 5},
 		}
-		json.NewEncoder(w).Encode(resp)
+		_ = json.NewEncoder(w).Encode(resp)
 	}))
 	defer server.Close()
 
@@ -97,7 +97,7 @@ func TestAnthropic_EmptyContent(t *testing.T) {
 			Content: []anthropicBlock{}, // no text blocks
 			Usage:   anthropicUsage{InputTokens: 10, OutputTokens: 0},
 		}
-		json.NewEncoder(w).Encode(resp)
+		_ = json.NewEncoder(w).Encode(resp)
 	}))
 	defer server.Close()
 
@@ -128,7 +128,7 @@ func TestOpenAI_EmptyContent(t *testing.T) {
 				{Message: openaiMessage{Role: "assistant", Content: ""}},
 			},
 		}
-		json.NewEncoder(w).Encode(resp)
+		_ = json.NewEncoder(w).Encode(resp)
 	}))
 	defer server.Close()
 
@@ -151,7 +151,7 @@ func TestOpenAI_EmptyContent(t *testing.T) {
 func TestOpenAI_NoChoices(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		resp := openaiResponse{Choices: []openaiChoice{}}
-		json.NewEncoder(w).Encode(resp)
+		_ = json.NewEncoder(w).Encode(resp)
 	}))
 	defer server.Close()
 
@@ -174,7 +174,7 @@ func TestOpenAI_NoChoices(t *testing.T) {
 func TestOpenAI_AuthError(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(401)
-		w.Write([]byte(`{"error":"unauthorized"}`))
+		_, _ = w.Write([]byte(`{"error":"unauthorized"}`))
 	}))
 	defer server.Close()
 
@@ -203,7 +203,7 @@ func TestOpenAI_ServerError(t *testing.T) {
 		attempts++
 		if attempts <= 1 {
 			w.WriteHeader(503)
-			w.Write([]byte(`{"error":"service unavailable"}`))
+			_, _ = w.Write([]byte(`{"error":"service unavailable"}`))
 			return
 		}
 		resp := openaiResponse{
@@ -211,7 +211,7 @@ func TestOpenAI_ServerError(t *testing.T) {
 				{Message: openaiMessage{Role: "assistant", Content: "[]"}},
 			},
 		}
-		json.NewEncoder(w).Encode(resp)
+		_ = json.NewEncoder(w).Encode(resp)
 	}))
 	defer server.Close()
 
@@ -240,7 +240,7 @@ func TestOpenAI_ServerError(t *testing.T) {
 func TestGemini_AuthError(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(403)
-		w.Write([]byte(`{"error":"forbidden"}`))
+		_, _ = w.Write([]byte(`{"error":"forbidden"}`))
 	}))
 	defer server.Close()
 
@@ -270,7 +270,7 @@ func TestGemini_AuthError(t *testing.T) {
 func TestGemini_NoCandidates(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		resp := geminiResponse{Candidates: []geminiCandidate{}}
-		json.NewEncoder(w).Encode(resp)
+		_ = json.NewEncoder(w).Encode(resp)
 	}))
 	defer server.Close()
 
@@ -297,7 +297,7 @@ func TestGemini_NoCandidates(t *testing.T) {
 func TestAnthropic_DefaultMaxTokens(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var body anthropicRequest
-		json.NewDecoder(r.Body).Decode(&body)
+		_ = json.NewDecoder(r.Body).Decode(&body)
 		if body.MaxTokens != 4096 {
 			t.Errorf("Default MaxTokens = %d, want 4096", body.MaxTokens)
 		}
@@ -305,7 +305,7 @@ func TestAnthropic_DefaultMaxTokens(t *testing.T) {
 			Content: []anthropicBlock{{Type: "text", Text: "[]"}},
 			Usage:   anthropicUsage{InputTokens: 10, OutputTokens: 5},
 		}
-		json.NewEncoder(w).Encode(resp)
+		_ = json.NewEncoder(w).Encode(resp)
 	}))
 	defer server.Close()
 

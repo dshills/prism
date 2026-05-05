@@ -123,7 +123,7 @@ func Snippet(content, path, lang, base string) (DiffResult, error) {
 		if err != nil {
 			return DiffResult{}, fmt.Errorf("creating temp dir: %w", err)
 		}
-		defer os.RemoveAll(tmpDir)
+		defer func() { _ = os.RemoveAll(tmpDir) }()
 
 		aDir := filepath.Join(tmpDir, "a")
 		bDir := filepath.Join(tmpDir, "b")

@@ -63,7 +63,7 @@ func (c *Cache) Get(key string) (string, bool) {
 	}
 	// Check TTL
 	if c.ttlSeconds > 0 && time.Since(entry.CreatedAt) > time.Duration(c.ttlSeconds)*time.Second {
-		os.Remove(path)
+		_ = os.Remove(path)
 		return "", false
 	}
 	return entry.Response, true

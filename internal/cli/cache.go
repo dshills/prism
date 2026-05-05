@@ -30,7 +30,7 @@ var cacheClearCmd = &cobra.Command{
 		if err := c.Clear(); err != nil {
 			return fmt.Errorf("clearing cache: %w", err)
 		}
-		fmt.Fprintln(os.Stdout, "Cache cleared.")
+		_, _ = fmt.Fprintln(os.Stdout, "Cache cleared.")
 		return nil
 	},
 }
@@ -48,7 +48,7 @@ var cacheShowCmd = &cobra.Command{
 			return fmt.Errorf("opening cache: %w", err)
 		}
 		if !c.Enabled() {
-			fmt.Fprintln(os.Stdout, "Cache is disabled.")
+			_, _ = fmt.Fprintln(os.Stdout, "Cache is disabled.")
 			return nil
 		}
 		stats, err := c.GetStats()
@@ -59,7 +59,7 @@ var cacheShowCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		fmt.Fprintln(os.Stdout, string(data))
+		_, _ = fmt.Fprintln(os.Stdout, string(data))
 		return nil
 	},
 }

@@ -66,7 +66,7 @@ var hookInstallCmd = &cobra.Command{
 			return nil
 		}
 
-		fmt.Fprintf(os.Stdout, "Installed prism pre-commit hook at %s\n", hookPath)
+		_, _ = fmt.Fprintf(os.Stdout, "Installed prism pre-commit hook at %s\n", hookPath)
 		return nil
 	},
 }
@@ -85,7 +85,7 @@ var hookUninstallCmd = &cobra.Command{
 		existing, err := os.ReadFile(hookPath)
 		if err != nil {
 			if os.IsNotExist(err) {
-				fmt.Fprintln(os.Stdout, "No pre-commit hook found.")
+				_, _ = fmt.Fprintln(os.Stdout, "No pre-commit hook found.")
 				return nil
 			}
 			fmt.Fprintf(os.Stderr, "Error reading hook file: %v\n", err)
@@ -103,7 +103,7 @@ var hookUninstallCmd = &cobra.Command{
 				exitCode = ExitRuntimeError
 				return nil
 			}
-			fmt.Fprintf(os.Stdout, "Removed prism pre-commit hook at %s\n", hookPath)
+			_, _ = fmt.Fprintf(os.Stdout, "Removed prism pre-commit hook at %s\n", hookPath)
 			return nil
 		}
 
@@ -113,7 +113,7 @@ var hookUninstallCmd = &cobra.Command{
 			return nil
 		}
 
-		fmt.Fprintf(os.Stdout, "Removed prism section from %s\n", hookPath)
+		_, _ = fmt.Fprintf(os.Stdout, "Removed prism section from %s\n", hookPath)
 		return nil
 	},
 }
@@ -130,7 +130,7 @@ func getHookPath() (string, error) {
 func generateHookScript(failOn, format string, maxFindings int) string {
 	var b strings.Builder
 	b.WriteString(hookMarkerStart + "\n")
-	b.WriteString(fmt.Sprintf("prism review staged --fail-on %s --format %s --max-findings %d\n", failOn, format, maxFindings))
+	fmt.Fprintf(&b, "prism review staged --fail-on %s --format %s --max-findings %d\n", failOn, format, maxFindings)
 	b.WriteString("PRISM_EXIT=$?\n")
 	b.WriteString("if [ $PRISM_EXIT -eq 1 ]; then\n")
 	b.WriteString("  echo \"prism: findings above threshold, commit blocked\"\n")

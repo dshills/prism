@@ -72,7 +72,7 @@ func (a *Anthropic) Review(ctx context.Context, req ReviewRequest) (ReviewRespon
 		if err != nil {
 			return fmt.Errorf("sending request: %w", err)
 		}
-		defer httpResp.Body.Close()
+		defer func() { _ = httpResp.Body.Close() }()
 
 		respBody, err := io.ReadAll(httpResp.Body)
 		if err != nil {

@@ -21,7 +21,7 @@ func TestOllama_Review(t *testing.T) {
 			},
 			Usage: openaiUsage{TotalTokens: 100},
 		}
-		json.NewEncoder(w).Encode(resp)
+		_ = json.NewEncoder(w).Encode(resp)
 	}))
 	defer server.Close()
 
@@ -59,7 +59,7 @@ func TestOllama_ReviewWithAPIKey(t *testing.T) {
 			},
 			Usage: openaiUsage{TotalTokens: 50},
 		}
-		json.NewEncoder(w).Encode(resp)
+		_ = json.NewEncoder(w).Encode(resp)
 	}))
 	defer server.Close()
 
@@ -87,7 +87,7 @@ func TestOllama_ServerError(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		attempts++
 		w.WriteHeader(500)
-		w.Write([]byte(`{"error":"internal server error"}`))
+		_, _ = w.Write([]byte(`{"error":"internal server error"}`))
 	}))
 	defer server.Close()
 
@@ -115,7 +115,7 @@ func TestOllama_EmptyResponse(t *testing.T) {
 		resp := openaiResponse{
 			Choices: []openaiChoice{},
 		}
-		json.NewEncoder(w).Encode(resp)
+		_ = json.NewEncoder(w).Encode(resp)
 	}))
 	defer server.Close()
 

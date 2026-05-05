@@ -40,19 +40,31 @@ func TestMergeEnv(t *testing.T) {
 	defer func() {
 		for k, v := range orig {
 			if v == "" {
-				os.Unsetenv(k)
+				_ = os.Unsetenv(k)
 			} else {
-				os.Setenv(k, v)
+				_ = os.Setenv(k, v)
 			}
 		}
 	}()
 
-	os.Setenv("PRISM_PROVIDER", "openai")
-	os.Setenv("PRISM_MODEL", "gpt-4o")
-	os.Setenv("PRISM_FAIL_ON", "high")
-	os.Setenv("PRISM_FORMAT", "json")
-	os.Setenv("PRISM_MAX_FINDINGS", "10")
-	os.Setenv("PRISM_CONTEXT_LINES", "5")
+	if err := os.Setenv("PRISM_PROVIDER", "openai"); err != nil {
+		t.Fatalf("Setenv: %v", err)
+	}
+	if err := os.Setenv("PRISM_MODEL", "gpt-4o"); err != nil {
+		t.Fatalf("Setenv: %v", err)
+	}
+	if err := os.Setenv("PRISM_FAIL_ON", "high"); err != nil {
+		t.Fatalf("Setenv: %v", err)
+	}
+	if err := os.Setenv("PRISM_FORMAT", "json"); err != nil {
+		t.Fatalf("Setenv: %v", err)
+	}
+	if err := os.Setenv("PRISM_MAX_FINDINGS", "10"); err != nil {
+		t.Fatalf("Setenv: %v", err)
+	}
+	if err := os.Setenv("PRISM_CONTEXT_LINES", "5"); err != nil {
+		t.Fatalf("Setenv: %v", err)
+	}
 
 	cfg := Default()
 	if err := mergeEnv(&cfg); err != nil {
@@ -167,13 +179,15 @@ func TestConfigPrecedence(t *testing.T) {
 	orig := os.Getenv("PRISM_PROVIDER")
 	defer func() {
 		if orig == "" {
-			os.Unsetenv("PRISM_PROVIDER")
+			_ = os.Unsetenv("PRISM_PROVIDER")
 		} else {
-			os.Setenv("PRISM_PROVIDER", orig)
+			_ = os.Setenv("PRISM_PROVIDER", orig)
 		}
 	}()
 
-	os.Setenv("PRISM_PROVIDER", "openai")
+	if err := os.Setenv("PRISM_PROVIDER", "openai"); err != nil {
+		t.Fatalf("Setenv: %v", err)
+	}
 
 	cfg := Default()
 	if err := mergeEnv(&cfg); err != nil {
@@ -281,13 +295,15 @@ func TestMergeEnv_InvalidMaxFindings(t *testing.T) {
 	orig := os.Getenv("PRISM_MAX_FINDINGS")
 	defer func() {
 		if orig == "" {
-			os.Unsetenv("PRISM_MAX_FINDINGS")
+			_ = os.Unsetenv("PRISM_MAX_FINDINGS")
 		} else {
-			os.Setenv("PRISM_MAX_FINDINGS", orig)
+			_ = os.Setenv("PRISM_MAX_FINDINGS", orig)
 		}
 	}()
 
-	os.Setenv("PRISM_MAX_FINDINGS", "notanumber")
+	if err := os.Setenv("PRISM_MAX_FINDINGS", "notanumber"); err != nil {
+		t.Fatalf("Setenv: %v", err)
+	}
 
 	cfg := Default()
 	err := mergeEnv(&cfg)
@@ -300,13 +316,15 @@ func TestMergeEnv_InvalidContextLines(t *testing.T) {
 	orig := os.Getenv("PRISM_CONTEXT_LINES")
 	defer func() {
 		if orig == "" {
-			os.Unsetenv("PRISM_CONTEXT_LINES")
+			_ = os.Unsetenv("PRISM_CONTEXT_LINES")
 		} else {
-			os.Setenv("PRISM_CONTEXT_LINES", orig)
+			_ = os.Setenv("PRISM_CONTEXT_LINES", orig)
 		}
 	}()
 
-	os.Setenv("PRISM_CONTEXT_LINES", "abc")
+	if err := os.Setenv("PRISM_CONTEXT_LINES", "abc"); err != nil {
+		t.Fatalf("Setenv: %v", err)
+	}
 
 	cfg := Default()
 	err := mergeEnv(&cfg)
@@ -350,13 +368,15 @@ func TestConfigDir_XDG(t *testing.T) {
 	orig := os.Getenv("XDG_CONFIG_HOME")
 	defer func() {
 		if orig == "" {
-			os.Unsetenv("XDG_CONFIG_HOME")
+			_ = os.Unsetenv("XDG_CONFIG_HOME")
 		} else {
-			os.Setenv("XDG_CONFIG_HOME", orig)
+			_ = os.Setenv("XDG_CONFIG_HOME", orig)
 		}
 	}()
 
-	os.Setenv("XDG_CONFIG_HOME", "/tmp/xdg-test")
+	if err := os.Setenv("XDG_CONFIG_HOME", "/tmp/xdg-test"); err != nil {
+		t.Fatalf("Setenv: %v", err)
+	}
 	dir, err := ConfigDir()
 	if err != nil {
 		t.Fatalf("ConfigDir error: %v", err)
@@ -370,13 +390,15 @@ func TestConfigPath(t *testing.T) {
 	orig := os.Getenv("XDG_CONFIG_HOME")
 	defer func() {
 		if orig == "" {
-			os.Unsetenv("XDG_CONFIG_HOME")
+			_ = os.Unsetenv("XDG_CONFIG_HOME")
 		} else {
-			os.Setenv("XDG_CONFIG_HOME", orig)
+			_ = os.Setenv("XDG_CONFIG_HOME", orig)
 		}
 	}()
 
-	os.Setenv("XDG_CONFIG_HOME", "/tmp/xdg-test")
+	if err := os.Setenv("XDG_CONFIG_HOME", "/tmp/xdg-test"); err != nil {
+		t.Fatalf("Setenv: %v", err)
+	}
 	path, err := ConfigPath()
 	if err != nil {
 		t.Fatalf("ConfigPath error: %v", err)
@@ -392,12 +414,14 @@ func TestSaveAndLoadFile(t *testing.T) {
 	orig := os.Getenv("XDG_CONFIG_HOME")
 	defer func() {
 		if orig == "" {
-			os.Unsetenv("XDG_CONFIG_HOME")
+			_ = os.Unsetenv("XDG_CONFIG_HOME")
 		} else {
-			os.Setenv("XDG_CONFIG_HOME", orig)
+			_ = os.Setenv("XDG_CONFIG_HOME", orig)
 		}
 	}()
-	os.Setenv("XDG_CONFIG_HOME", tmpDir)
+	if err := os.Setenv("XDG_CONFIG_HOME", tmpDir); err != nil {
+		t.Fatalf("Setenv: %v", err)
+	}
 
 	cfg := Default()
 	cfg.Provider = "openai"
@@ -429,12 +453,14 @@ func TestLoadFile_NoFile(t *testing.T) {
 	orig := os.Getenv("XDG_CONFIG_HOME")
 	defer func() {
 		if orig == "" {
-			os.Unsetenv("XDG_CONFIG_HOME")
+			_ = os.Unsetenv("XDG_CONFIG_HOME")
 		} else {
-			os.Setenv("XDG_CONFIG_HOME", orig)
+			_ = os.Setenv("XDG_CONFIG_HOME", orig)
 		}
 	}()
-	os.Setenv("XDG_CONFIG_HOME", tmpDir)
+	if err := os.Setenv("XDG_CONFIG_HOME", tmpDir); err != nil {
+		t.Fatalf("Setenv: %v", err)
+	}
 
 	cfg, err := LoadFile()
 	if err != nil {
@@ -452,12 +478,14 @@ func TestLoad_Integration(t *testing.T) {
 	orig := os.Getenv("XDG_CONFIG_HOME")
 	defer func() {
 		if orig == "" {
-			os.Unsetenv("XDG_CONFIG_HOME")
+			_ = os.Unsetenv("XDG_CONFIG_HOME")
 		} else {
-			os.Setenv("XDG_CONFIG_HOME", orig)
+			_ = os.Setenv("XDG_CONFIG_HOME", orig)
 		}
 	}()
-	os.Setenv("XDG_CONFIG_HOME", tmpDir)
+	if err := os.Setenv("XDG_CONFIG_HOME", tmpDir); err != nil {
+		t.Fatalf("Setenv: %v", err)
+	}
 
 	// No config file — should get defaults + overrides
 	cfg, err := Load(map[string]string{"provider": "openai"})

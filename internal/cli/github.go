@@ -7,8 +7,8 @@ import (
 	"strconv"
 
 	"github.com/dshills/prism/internal/config"
-	"github.com/dshills/prism/internal/github"
 	"github.com/dshills/prism/internal/gitctx"
+	"github.com/dshills/prism/internal/github"
 	"github.com/dshills/prism/internal/output"
 	"github.com/dshills/prism/internal/providers"
 	"github.com/dshills/prism/internal/review"
@@ -76,7 +76,7 @@ var githubCmd = &cobra.Command{
 		}
 
 		if diff == "" {
-			fmt.Fprintln(os.Stdout, "PR has no diff — nothing to review.")
+			_, _ = fmt.Fprintln(os.Stdout, "PR has no diff — nothing to review.")
 			return nil
 		}
 

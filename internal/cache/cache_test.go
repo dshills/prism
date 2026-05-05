@@ -146,8 +146,12 @@ func TestCache_GetStats(t *testing.T) {
 	}
 
 	// Add entries
-	c.Put("key1", "value1")
-	c.Put("key2", "value2")
+	if err := c.Put("key1", "value1"); err != nil {
+		t.Fatalf("Put key1: %v", err)
+	}
+	if err := c.Put("key2", "value2"); err != nil {
+		t.Fatalf("Put key2: %v", err)
+	}
 
 	stats, err = c.GetStats()
 	if err != nil {
@@ -216,7 +220,9 @@ func TestCache_GetCorruptedJSON(t *testing.T) {
 	// Write a corrupted file at the expected path
 	key := "corrupt-test"
 	path := filepath.Join(dir, HashKey(key)+".json")
-	os.WriteFile(path, []byte("not valid json{{{"), 0o644)
+	if err := os.WriteFile(path, []byte("not valid json{{{"), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
 
 	_, ok := c.Get(key)
 	if ok {
@@ -276,9 +282,13 @@ func TestCache_GetStats_WithExpired(t *testing.T) {
 		t.Fatalf("New error: %v", err)
 	}
 
-	c.Put("key1", "val1")
+	if err := c.Put("key1", "val1"); err != nil {
+		t.Fatalf("Put key1: %v", err)
+	}
 	time.Sleep(1100 * time.Millisecond) // Wait for expiry
-	c.Put("key2", "val2")              // This one is fresh
+	if err := c.Put("key2", "val2"); err != nil {
+		t.Fatalf("Put key2: %v", err)
+	} // This one is fresh
 
 	stats, err := c.GetStats()
 	if err != nil {
@@ -317,8 +327,12 @@ func TestCache_OverwriteExisting(t *testing.T) {
 		t.Fatalf("New error: %v", err)
 	}
 
-	c.Put("key", "original")
-	c.Put("key", "updated")
+	if err := c.Put("key", "original"); err != nil {
+		t.Fatalf("Put: %v", err)
+	}
+	if err := c.Put("key", "updated"); err != nil {
+		t.Fatalf("Put: %v", err)
+	}
 
 	got, ok := c.Get("key")
 	if !ok {

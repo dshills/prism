@@ -68,11 +68,11 @@ var modelsListCmd = &cobra.Command{
 	Short: "List known providers and models",
 	Run: func(cmd *cobra.Command, args []string) {
 		for _, info := range knownModels {
-			fmt.Fprintf(os.Stdout, "%s:\n", info.Provider)
+			_, _ = fmt.Fprintf(os.Stdout, "%s:\n", info.Provider)
 			for _, m := range info.Models {
-				fmt.Fprintf(os.Stdout, "  - %s\n", m)
+				_, _ = fmt.Fprintf(os.Stdout, "  - %s\n", m)
 			}
-			fmt.Fprintln(os.Stdout)
+			_, _ = fmt.Fprintln(os.Stdout)
 		}
 	},
 }
@@ -91,7 +91,7 @@ var modelsDoctorCmd = &cobra.Command{
 			providerName = flagProvider
 		}
 
-		fmt.Fprintf(os.Stdout, "Checking %s...\n", providerName)
+		_, _ = fmt.Fprintf(os.Stdout, "Checking %s...\n", providerName)
 
 		p, err := providers.New(providerName, cfg.Model)
 		if err != nil {
@@ -118,7 +118,7 @@ var modelsDoctorCmd = &cobra.Command{
 			return nil
 		}
 
-		fmt.Fprintf(os.Stdout, "OK: %s is configured and responding\n", providerName)
+		_, _ = fmt.Fprintf(os.Stdout, "OK: %s is configured and responding\n", providerName)
 		return nil
 	},
 }

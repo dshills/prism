@@ -33,7 +33,7 @@ var configInitCmd = &cobra.Command{
 			return fmt.Errorf("writing config: %w", err)
 		}
 
-		fmt.Fprintf(os.Stdout, "Config file created at %s\n", path)
+		_, _ = fmt.Fprintf(os.Stdout, "Config file created at %s\n", path)
 		return nil
 	},
 }
@@ -57,7 +57,7 @@ var configSetCmd = &cobra.Command{
 			return fmt.Errorf("saving config: %w", err)
 		}
 
-		fmt.Fprintf(os.Stdout, "Set %s = %s\n", args[0], args[1])
+		_, _ = fmt.Fprintf(os.Stdout, "Set %s = %s\n", args[0], args[1])
 		return nil
 	},
 }
@@ -76,7 +76,7 @@ var configShowCmd = &cobra.Command{
 			return err
 		}
 
-		fmt.Fprintln(os.Stdout, string(data))
+		_, _ = fmt.Fprintln(os.Stdout, string(data))
 		return nil
 	},
 }
