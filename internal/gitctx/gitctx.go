@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"github.com/dshills/prism/internal/diffutil"
 )
 
 // DiffOptions controls how diffs are gathered.
@@ -228,42 +230,15 @@ func extractFiles(diff string) []string {
 }
 
 func filterExcluded(diff string, excludes []string) string {
-	sections := splitDiffSections(diff)
+	sections := diffutil.SplitSections(diff)
 	var kept []string
 	for _, section := range sections {
-		path := extractPathFromSection(section)
+		path := diffutil.PathFromSection(section)
 		if path == "" || !MatchesAny(path, excludes) {
 			kept = append(kept, section)
 		}
 	}
 	return strings.Join(kept, "")
-}
-
-func splitDiffSections(diff string) []string {
-	var sections []string
-	lines := strings.Split(diff, "\n")
-	var current strings.Builder
-	for _, line := range lines {
-		if strings.HasPrefix(line, "diff --git") && current.Len() > 0 {
-			sections = append(sections, current.String())
-			current.Reset()
-		}
-		current.WriteString(line)
-		current.WriteString("\n")
-	}
-	if current.Len() > 0 {
-		sections = append(sections, current.String())
-	}
-	return sections
-}
-
-func extractPathFromSection(section string) string {
-	for _, line := range strings.Split(section, "\n") {
-		if strings.HasPrefix(line, "+++ b/") {
-			return strings.TrimPrefix(line, "+++ b/")
-		}
-	}
-	return ""
 }
 
 func filterFileList(files []string, excludes []string) []string {

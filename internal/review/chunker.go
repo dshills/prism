@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/dshills/prism/internal/config"
+	"github.com/dshills/prism/internal/diffutil"
 	"github.com/dshills/prism/internal/providers"
 )
 
@@ -30,7 +31,7 @@ type Chunk struct {
 // Each chunk contains the diff sections for one or more files,
 // staying under maxBytes per chunk.
 func SplitIntoChunks(diff string, maxBytes int) []Chunk {
-	sections := splitSections(diff)
+	sections := diffutil.SplitSections(diff)
 	if len(sections) == 0 {
 		return nil
 	}
@@ -45,7 +46,7 @@ func SplitIntoChunks(diff string, maxBytes int) []Chunk {
 	idx := 0
 
 	for _, sec := range sections {
-		path := pathFromSection(sec)
+		path := diffutil.PathFromSection(sec)
 
 		// If adding this section would exceed maxBytes, flush the current chunk
 		if currentDiff.Len() > 0 && currentDiff.Len()+len(sec) > maxBytes {
@@ -244,37 +245,4 @@ func findingStartLine(f Finding) int {
 		return f.Locations[0].Lines.Start
 	}
 	return 0
-}
-
-func splitSections(diff string) []string {
-	if strings.TrimSpace(diff) == "" {
-		return nil
-	}
-	var sections []string
-	lines := strings.Split(diff, "\n")
-	var current strings.Builder
-	for _, line := range lines {
-		if strings.HasPrefix(line, "diff --git") && current.Len() > 0 {
-			sections = append(sections, current.String())
-			current.Reset()
-		}
-		current.WriteString(line)
-		current.WriteString("\n")
-	}
-	if current.Len() > 0 {
-		s := current.String()
-		if strings.TrimSpace(s) != "" {
-			sections = append(sections, s)
-		}
-	}
-	return sections
-}
-
-func pathFromSection(section string) string {
-	for _, line := range strings.Split(section, "\n") {
-		if strings.HasPrefix(line, "+++ b/") {
-			return strings.TrimPrefix(line, "+++ b/")
-		}
-	}
-	return ""
 }

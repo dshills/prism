@@ -244,20 +244,6 @@ func TestFindingStartLine_NoLocations(t *testing.T) {
 	}
 }
 
-func TestPathFromSection_NoHeader(t *testing.T) {
-	section := "diff --git a/main.go b/main.go\nsome content without +++ header\n"
-	if pathFromSection(section) != "" {
-		t.Error("pathFromSection should return empty for section without +++ b/ header")
-	}
-}
-
-func TestSplitSections_WhitespaceOnly(t *testing.T) {
-	sections := splitSections("   \n\t\n  ")
-	if len(sections) != 0 {
-		t.Errorf("got %d sections for whitespace-only, want 0", len(sections))
-	}
-}
-
 func TestRunChunked_Deduplication(t *testing.T) {
 	// Both chunks return the same finding
 	same := `[{"severity":"high","category":"bug","title":"Same Bug","message":"msg","suggestion":"fix","confidence":0.9,"path":"shared.go","startLine":10,"endLine":12,"tags":[]}]`

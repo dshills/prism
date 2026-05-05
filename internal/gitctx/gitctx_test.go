@@ -84,30 +84,6 @@ func TestMatchesAny(t *testing.T) {
 	}
 }
 
-func TestSplitDiffSections(t *testing.T) {
-	diff := `diff --git a/a.go b/a.go
---- a/a.go
-+++ b/a.go
-@@ -1,3 +1,4 @@
-+line1
-diff --git a/b.go b/b.go
---- a/b.go
-+++ b/b.go
-@@ -1,3 +1,4 @@
-+line2
-`
-	sections := splitDiffSections(diff)
-	if len(sections) != 2 {
-		t.Fatalf("got %d sections, want 2", len(sections))
-	}
-	if !strings.Contains(sections[0], "a.go") {
-		t.Error("section 0 should contain a.go")
-	}
-	if !strings.Contains(sections[1], "b.go") {
-		t.Error("section 1 should contain b.go")
-	}
-}
-
 func TestSnippet_NoBase(t *testing.T) {
 	content := "package main\n\nfunc main() {}\n"
 	result, err := Snippet(content, "main.go", "go", "")
@@ -178,22 +154,6 @@ func TestBuildDiffArgs_NoContextLines(t *testing.T) {
 		if strings.HasPrefix(a, "-U") {
 			t.Error("Should not have -U flag with ContextLines=0")
 		}
-	}
-}
-
-func TestExtractPathFromSection(t *testing.T) {
-	section := "diff --git a/main.go b/main.go\n--- a/main.go\n+++ b/main.go\n@@ -1,3 +1,4 @@\n+import\n"
-	path := extractPathFromSection(section)
-	if path != "main.go" {
-		t.Errorf("extractPathFromSection = %q, want %q", path, "main.go")
-	}
-}
-
-func TestExtractPathFromSection_NoPath(t *testing.T) {
-	section := "diff --git a/main.go b/main.go\nsome other content\n"
-	path := extractPathFromSection(section)
-	if path != "" {
-		t.Errorf("extractPathFromSection = %q, want empty", path)
 	}
 }
 
