@@ -30,23 +30,30 @@ func GetWriter(format string) (Writer, error) {
 }
 
 // WriteReport writes the report to the specified output (file path or stdout).
-func WriteReport(report *review.Report, format, outPath string) error {
-	writer, err := GetWriter(format)
+func WriteReport(report *review.Report, format, outPath string) (err error) {
+	var writer Writer
+	writer, err = GetWriter(format)
 	if err != nil {
-		return err
+		return
 	}
 
 	var w io.Writer
 	if outPath != "" {
-		f, err := os.Create(outPath)
+		var f *os.File
+		f, err = os.Create(outPath)
 		if err != nil {
 			return fmt.Errorf("creating output file: %w", err)
 		}
-		defer f.Close()
+		defer func() {
+			if cerr := f.Close(); cerr != nil && err == nil {
+				err = fmt.Errorf("closing output file: %w", cerr)
+			}
+		}()
 		w = f
 	} else {
 		w = os.Stdout
 	}
 
-	return writer.Write(w, report)
+	err = writer.Write(w, report)
+	return
 }
