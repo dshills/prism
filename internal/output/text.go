@@ -22,6 +22,9 @@ func (t *TextWriter) Write(w io.Writer, report *review.Report) error {
 		ew.printf("Range: %s\n", report.Inputs.Range)
 	}
 	ew.printf("Repository: %s (branch: %s)\n", report.Repo.Root, report.Repo.Branch)
+	if label := provenanceLabel(report.Provenance); label != "" {
+		ew.printf("Reviewed by: %s\n", label)
+	}
 	ew.println(strings.Repeat("─", 60))
 	ew.printf("Findings: %d total", total)
 	if total > 0 {
@@ -98,7 +101,7 @@ type errWriter struct {
 	err error
 }
 
-func (ew *errWriter) printf(format string, args ...interface{}) {
+func (ew *errWriter) printf(format string, args ...any) {
 	if ew.err != nil {
 		return
 	}
@@ -145,6 +148,24 @@ func severityIcon(s review.Severity) string {
 	default:
 		return "[?]"
 	}
+}
+
+// provenanceLabel formats a slice of provenance entries into a
+// comma-separated string of provider/model pairs for plain-text output.
+// Callers should pass deduplicated provenance (as review.CollectProvenance provides).
+func provenanceLabel(provenance []review.Provenance) string {
+	parts := make([]string, 0, len(provenance))
+	for _, p := range provenance {
+		switch {
+		case p.Provider != "" && p.Model != "":
+			parts = append(parts, p.Provider+"/"+p.Model)
+		case p.Model != "":
+			parts = append(parts, p.Model)
+		case p.Provider != "":
+			parts = append(parts, p.Provider)
+		}
+	}
+	return strings.Join(parts, ", ")
 }
 
 func wrapText(text string, width int) []string {
