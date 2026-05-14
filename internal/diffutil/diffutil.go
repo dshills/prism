@@ -10,14 +10,10 @@ func SplitSections(diff string) []string {
 		return nil
 	}
 	var sections []string
-	lines := strings.Split(diff, "\n")
-	// strings.Split on a newline-terminated string produces a trailing empty
-	// element; drop it so we don't emit a spurious extra newline per section.
-	if len(lines) > 0 && lines[len(lines)-1] == "" {
-		lines = lines[:len(lines)-1]
-	}
 	var current strings.Builder
-	for _, line := range lines {
+	// TrimSuffix drops the trailing newline so SplitSeq does not yield a
+	// spurious empty final element, preserving the original behaviour.
+	for line := range strings.SplitSeq(strings.TrimSuffix(diff, "\n"), "\n") {
 		if strings.HasPrefix(line, "diff --git") && current.Len() > 0 {
 			sections = append(sections, current.String())
 			current.Reset()
@@ -37,9 +33,9 @@ func SplitSections(diff string) []string {
 // PathFromSection extracts the file path from a diff section by reading the
 // "+++ b/<path>" header line. Returns empty string if not found.
 func PathFromSection(section string) string {
-	for _, line := range strings.Split(section, "\n") {
-		if strings.HasPrefix(line, "+++ b/") {
-			return strings.TrimPrefix(line, "+++ b/")
+	for line := range strings.SplitSeq(section, "\n") {
+		if rest, ok := strings.CutPrefix(line, "+++ b/"); ok {
+			return rest
 		}
 	}
 	return ""
