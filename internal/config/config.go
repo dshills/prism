@@ -12,19 +12,21 @@ import (
 
 // Config represents the prism configuration.
 type Config struct {
-	Provider     string        `json:"provider"`
-	Model        string        `json:"model"`
-	Compare      []string      `json:"compare,omitempty"`
-	Format       string        `json:"format"`
-	FailOn       string        `json:"failOn"`
-	MaxFindings  int           `json:"maxFindings"`
-	ContextLines int           `json:"contextLines"`
-	Include      []string      `json:"include"`
-	Exclude      []string      `json:"exclude"`
-	MaxDiffBytes int           `json:"maxDiffBytes"`
-	RulesFile    string        `json:"rulesFile,omitempty"`
-	Cache        CacheConfig   `json:"cache"`
-	Privacy      PrivacyConfig `json:"privacy"`
+	Provider       string        `json:"provider"`
+	Model          string        `json:"model"`
+	Compare        []string      `json:"compare,omitempty"`
+	Format         string        `json:"format"`
+	FailOn         string        `json:"failOn"`
+	MaxFindings    int           `json:"maxFindings"`
+	ContextLines   int           `json:"contextLines"`
+	Include        []string      `json:"include"`
+	Exclude        []string      `json:"exclude"`
+	MaxDiffBytes   int           `json:"maxDiffBytes"`
+	MaxConcurrency int           `json:"maxConcurrency,omitempty"`
+	RateLimitRPM   int           `json:"rateLimitRpm,omitempty"`
+	RulesFile      string        `json:"rulesFile,omitempty"`
+	Cache          CacheConfig   `json:"cache"`
+	Privacy        PrivacyConfig `json:"privacy"`
 }
 
 // CacheConfig controls caching behavior.
@@ -179,6 +181,12 @@ func mergeFile(dst *Config, src Config) {
 	if src.MaxDiffBytes > 0 {
 		dst.MaxDiffBytes = src.MaxDiffBytes
 	}
+	if src.MaxConcurrency > 0 {
+		dst.MaxConcurrency = src.MaxConcurrency
+	}
+	if src.RateLimitRPM > 0 {
+		dst.RateLimitRPM = src.RateLimitRPM
+	}
 	if src.RulesFile != "" {
 		dst.RulesFile = src.RulesFile
 	}
@@ -228,6 +236,20 @@ func mergeEnv(cfg *Config) error {
 			return fmt.Errorf("PRISM_CONTEXT_LINES must be an integer, got %q", v)
 		}
 		cfg.ContextLines = n
+	}
+	if v := os.Getenv("PRISM_MAX_CONCURRENCY"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil {
+			return fmt.Errorf("PRISM_MAX_CONCURRENCY must be an integer, got %q", v)
+		}
+		cfg.MaxConcurrency = n
+	}
+	if v := os.Getenv("PRISM_RATE_LIMIT_RPM"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil {
+			return fmt.Errorf("PRISM_RATE_LIMIT_RPM must be an integer, got %q", v)
+		}
+		cfg.RateLimitRPM = n
 	}
 	return nil
 }

@@ -11,11 +11,10 @@ import (
 	"github.com/dshills/prism/internal/config"
 	"github.com/dshills/prism/internal/diffutil"
 	"github.com/dshills/prism/internal/providers"
+	"github.com/dshills/prism/internal/ratelimit"
 )
 
 const (
-	// maxConcurrency limits parallel LLM calls.
-	maxConcurrency = 4
 	// ChunkThreshold is the byte size above which we switch to chunked review.
 	ChunkThreshold = 100000 // 100KB
 )
@@ -119,9 +118,20 @@ func RunChunkedWithOptions(ctx context.Context, chunks []Chunk, provider provide
 		err      error
 	}
 
+	// Compute effective concurrency and rate limit from config + provider defaults.
+	concurrency := cfg.MaxConcurrency
+	if concurrency <= 0 {
+		concurrency = providers.DefaultMaxConcurrency(provider.Name())
+	}
+	rpm := cfg.RateLimitRPM
+	if rpm <= 0 {
+		rpm = providers.DefaultRPM(provider.Name())
+	}
+	limiter := ratelimit.New(rpm)
+
 	results := make([]result, len(chunks))
 	var wg sync.WaitGroup
-	sem := make(chan struct{}, maxConcurrency)
+	sem := make(chan struct{}, concurrency)
 	var totalLLMMs int64
 	var mu sync.Mutex
 
@@ -131,6 +141,11 @@ func RunChunkedWithOptions(ctx context.Context, chunks []Chunk, provider provide
 			defer wg.Done()
 			sem <- struct{}{}        // acquire
 			defer func() { <-sem }() // release
+
+			if err := limiter.Wait(ctx); err != nil {
+				results[i] = result{index: i, err: fmt.Errorf("chunk %d: rate limiter: %w", i, err)}
+				return
+			}
 
 			sysPr, userPr := builder(chunk.Diff, chunk.Files, cfg, rules)
 			req := providers.ReviewRequest{
