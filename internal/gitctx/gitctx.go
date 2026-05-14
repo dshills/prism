@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/dshills/prism/internal/diffutil"
@@ -369,56 +370,138 @@ func isBinary(path string) bool {
 	return bytes.IndexByte(buf[:n], 0) >= 0
 }
 
-// Codebase reads all tracked source files and assembles them as
-// synthetic unified diffs. Returns a DiffResult with Mode="codebase".
+// codebaseWorkers is the number of concurrent file-read goroutines used by
+// Codebase. Disk I/O is the bottleneck on most systems, so 16 concurrent
+// reads saturates SSDs without thrashing spinning-disk page caches.
+const codebaseWorkers = 16
+
+// Codebase reads all tracked source files and assembles them as synthetic
+// unified diffs. Returns a DiffResult with Mode="codebase".
+//
+// Reads run in parallel (up to codebaseWorkers goroutines) via a pipeline:
+// each file gets a dedicated buffered channel; the assembly consumer reads
+// results in sorted order and cancels the derived context once the byte
+// budget is exhausted, causing queued goroutines to skip their file reads
+// rather than loading data that will be discarded.
 func Codebase(ctx context.Context, opts DiffOptions) (DiffResult, error) {
 	meta, err := GetRepoMeta(ctx)
 	if err != nil {
 		return DiffResult{}, err
 	}
-
 	files, err := WalkFiles(opts)
 	if err != nil {
 		return DiffResult{}, err
 	}
 
+	// Derive a cancellable context so the consumer can abort queued reads.
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	sem := make(chan struct{}, codebaseWorkers)
+	// One buffered channel per file: each producer sends exactly once (section
+	// string or ""), so producers never block on send regardless of consumer
+	// progress.
+	chans := make([]chan string, len(files))
+	for i := range chans {
+		chans[i] = make(chan string, 1)
+	}
+
+	launchDone := make(chan struct{})
+	var wg sync.WaitGroup
+
+	go func() {
+		defer close(launchDone)
+		for i, path := range files {
+			select {
+			case sem <- struct{}{}:
+			case <-ctx.Done():
+				// Budget exhausted. Goroutines for 0..i-1 fill their own
+				// channels; fill i..n-1 here so the consumer never deadlocks.
+				for j := i; j < len(files); j++ {
+					chans[j] <- ""
+				}
+				wg.Wait()
+				return
+			}
+			wg.Add(1)
+			go func(i int, path string) {
+				defer wg.Done()
+				defer func() { <-sem }()
+				if ctx.Err() != nil {
+					chans[i] <- ""
+					return
+				}
+				data, readErr := os.ReadFile(path)
+				if readErr != nil || len(data) > maxFileBytes {
+					chans[i] <- ""
+					return
+				}
+				// Check for binary content using the already-read data (same
+				// heuristic as isBinary but without a second file open).
+				checkLen := len(data)
+				if checkLen > 512 {
+					checkLen = 512
+				}
+				if bytes.IndexByte(data[:checkLen], 0) >= 0 {
+					chans[i] <- ""
+					return
+				}
+				// Empty files have no lines and no diff content.
+				if len(data) == 0 {
+					chans[i] <- ""
+					return
+				}
+				// Split on newlines, then drop the trailing empty element that
+				// bytes.Split produces for newline-terminated files. This gives
+				// the correct line count for the hunk header without a TrimSuffix
+				// that would wrongly collapse single-newline files to 0 lines.
+				hasTrailingNewline := data[len(data)-1] == '\n'
+				lines := bytes.Split(data, []byte("\n"))
+				if hasTrailingNewline {
+					lines = lines[:len(lines)-1]
+				}
+				var b strings.Builder
+				b.Grow(len(data) + len(lines) + 128)
+				b.WriteString("diff --git a/")
+				b.WriteString(path)
+				b.WriteString(" b/")
+				b.WriteString(path)
+				b.WriteString("\nnew file mode 100644\n--- /dev/null\n+++ b/")
+				b.WriteString(path)
+				b.WriteByte('\n')
+				fmt.Fprintf(&b, "@@ -0,0 +1,%d @@\n", len(lines))
+				for _, line := range lines {
+					b.WriteByte('+')
+					b.Write(line)
+					b.WriteByte('\n')
+				}
+				if !hasTrailingNewline {
+					b.WriteString("\\ No newline at end of file\n")
+				}
+				chans[i] <- b.String()
+			}(i, path)
+		}
+		wg.Wait()
+	}()
+
+	// Consume results in sorted order, enforcing the byte budget.
 	var combined strings.Builder
 	var includedFiles []string
 	totalBytes := 0
-
-	for _, path := range files {
-		data, err := os.ReadFile(path)
-		if err != nil {
-			continue // skip unreadable files
+	for i, path := range files {
+		s := <-chans[i]
+		if s == "" {
+			continue
 		}
-		if len(data) > maxFileBytes {
-			continue // skip oversized files
-		}
-
-		content := string(data)
-		lines := strings.Split(content, "\n")
-
-		var section strings.Builder
-		fmt.Fprintf(&section, "diff --git a/%s b/%s\n", path, path)
-		fmt.Fprintf(&section, "new file mode 100644\n")
-		fmt.Fprintf(&section, "--- /dev/null\n")
-		fmt.Fprintf(&section, "+++ b/%s\n", path)
-		fmt.Fprintf(&section, "@@ -0,0 +1,%d @@\n", len(lines))
-		for _, line := range lines {
-			fmt.Fprintf(&section, "+%s\n", line)
-		}
-
-		sectionStr := section.String()
-
-		// Respect MaxDiffBytes as total budget
-		if opts.MaxDiffBytes > 0 && totalBytes+len(sectionStr) > opts.MaxDiffBytes {
+		if opts.MaxDiffBytes > 0 && totalBytes+len(s) > opts.MaxDiffBytes {
+			cancel() // abort remaining goroutines
 			break
 		}
-
-		combined.WriteString(sectionStr)
+		combined.WriteString(s)
 		includedFiles = append(includedFiles, path)
-		totalBytes += len(sectionStr)
+		totalBytes += len(s)
 	}
+	<-launchDone // wait for all goroutines before returning
 
 	return DiffResult{
 		Diff:  combined.String(),
