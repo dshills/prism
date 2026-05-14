@@ -1,10 +1,20 @@
 package review
 
 import (
+	"bytes"
 	"fmt"
 	"path/filepath"
 	"strings"
+	"sync"
 )
+
+// promptPool reuses bytes.Buffer backing arrays across prompt-build calls.
+// In chunked/codebase mode each chunk builds a prompt that mirrors the diff
+// size (10–100 KB); bytes.Buffer.Reset() retains the underlying slice
+// capacity, so pooled buffers avoid reallocating those large arrays.
+var promptPool = sync.Pool{
+	New: func() any { return new(bytes.Buffer) },
+}
 
 const systemPrompt = `You are a strict, expert code reviewer. Your job is to review code diffs and produce structured findings in JSON format.
 
@@ -42,21 +52,27 @@ func BuildUserPrompt(diff string, files []string, maxFindings int, failOn string
 
 // BuildUserPromptWithRules constructs the user prompt with optional rules.
 func BuildUserPromptWithRules(diff string, files []string, maxFindings int, failOn string, rules *Rules) string {
-	var b strings.Builder
+	b := promptPool.Get().(*bytes.Buffer)
+	b.Reset()
+	defer func() {
+		if b.Cap() <= 1<<20 { // don't retain oversized buffers in the pool
+			promptPool.Put(b)
+		}
+	}()
 
 	b.WriteString("Review the following code diff.\n\n")
 
 	if maxFindings > 0 {
-		fmt.Fprintf(&b, "Return at most %d findings.\n", maxFindings)
+		fmt.Fprintf(b, "Return at most %d findings.\n", maxFindings)
 	}
 	if failOn != "" && failOn != "none" {
-		fmt.Fprintf(&b, "Focus especially on findings with severity %s or above.\n", failOn)
+		fmt.Fprintf(b, "Focus especially on findings with severity %s or above.\n", failOn)
 	}
 
 	// Language hints from file extensions
 	langs := detectLanguages(files)
 	if len(langs) > 0 {
-		fmt.Fprintf(&b, "Languages: %s\n", strings.Join(langs, ", "))
+		fmt.Fprintf(b, "Languages: %s\n", strings.Join(langs, ", "))
 	}
 
 	// Rules-based instructions
@@ -111,23 +127,29 @@ func CodebaseSystemPrompt() string {
 
 // BuildCodebaseUserPrompt constructs the user prompt for codebase review.
 func BuildCodebaseUserPrompt(diff string, files []string, maxFindings int, maxFindingsPerFile int, failOn string, rules *Rules) string {
-	var b strings.Builder
+	b := promptPool.Get().(*bytes.Buffer)
+	b.Reset()
+	defer func() {
+		if b.Cap() <= 1<<20 { // don't retain oversized buffers in the pool
+			promptPool.Put(b)
+		}
+	}()
 
 	b.WriteString("Review the following complete source files.\n\n")
 
 	if maxFindings > 0 {
-		fmt.Fprintf(&b, "Return at most %d findings total.\n", maxFindings)
+		fmt.Fprintf(b, "Return at most %d findings total.\n", maxFindings)
 	}
 	if maxFindingsPerFile > 0 {
-		fmt.Fprintf(&b, "Return at most %d findings per file.\n", maxFindingsPerFile)
+		fmt.Fprintf(b, "Return at most %d findings per file.\n", maxFindingsPerFile)
 	}
 	if failOn != "" && failOn != "none" {
-		fmt.Fprintf(&b, "Focus especially on findings with severity %s or above.\n", failOn)
+		fmt.Fprintf(b, "Focus especially on findings with severity %s or above.\n", failOn)
 	}
 
 	langs := detectLanguages(files)
 	if len(langs) > 0 {
-		fmt.Fprintf(&b, "Languages: %s\n", strings.Join(langs, ", "))
+		fmt.Fprintf(b, "Languages: %s\n", strings.Join(langs, ", "))
 	}
 
 	if rulesSection := BuildRulesPromptSection(rules); rulesSection != "" {
