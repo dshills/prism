@@ -314,3 +314,106 @@ func TestRunChunkedWithOptions_NilBuilder(t *testing.T) {
 		t.Errorf("got %d findings, want 0", len(findings))
 	}
 }
+
+func TestSortFindings_MixedSeverity(t *testing.T) {
+	findings := []Finding{
+		{ID: "1", Severity: SeverityLow, Title: "Low", Locations: []Location{{Path: "a.go", Lines: LineRange{Start: 1}}}},
+		{ID: "2", Severity: SeverityHigh, Title: "High", Locations: []Location{{Path: "a.go", Lines: LineRange{Start: 2}}}},
+		{ID: "3", Severity: SeverityMedium, Title: "Medium", Locations: []Location{{Path: "a.go", Lines: LineRange{Start: 3}}}},
+	}
+	SortFindings(findings)
+
+	if findings[0].Severity != SeverityHigh {
+		t.Errorf("findings[0].Severity = %q, want high", findings[0].Severity)
+	}
+	if findings[1].Severity != SeverityMedium {
+		t.Errorf("findings[1].Severity = %q, want medium", findings[1].Severity)
+	}
+	if findings[2].Severity != SeverityLow {
+		t.Errorf("findings[2].Severity = %q, want low", findings[2].Severity)
+	}
+}
+
+func TestSortFindings_SameSeverityDifferentPaths(t *testing.T) {
+	findings := []Finding{
+		{ID: "1", Severity: SeverityMedium, Title: "Z file", Locations: []Location{{Path: "z.go", Lines: LineRange{Start: 1}}}},
+		{ID: "2", Severity: SeverityMedium, Title: "A file", Locations: []Location{{Path: "a.go", Lines: LineRange{Start: 1}}}},
+		{ID: "3", Severity: SeverityMedium, Title: "M file", Locations: []Location{{Path: "m.go", Lines: LineRange{Start: 1}}}},
+	}
+	SortFindings(findings)
+
+	if findings[0].Locations[0].Path != "a.go" {
+		t.Errorf("findings[0].Path = %q, want a.go", findings[0].Locations[0].Path)
+	}
+	if findings[1].Locations[0].Path != "m.go" {
+		t.Errorf("findings[1].Path = %q, want m.go", findings[1].Locations[0].Path)
+	}
+	if findings[2].Locations[0].Path != "z.go" {
+		t.Errorf("findings[2].Path = %q, want z.go", findings[2].Locations[0].Path)
+	}
+}
+
+func TestSortFindings_SameSeverityAndPathDifferentLines(t *testing.T) {
+	findings := []Finding{
+		{ID: "1", Severity: SeverityHigh, Title: "Line 50", Locations: []Location{{Path: "x.go", Lines: LineRange{Start: 50}}}},
+		{ID: "2", Severity: SeverityHigh, Title: "Line 10", Locations: []Location{{Path: "x.go", Lines: LineRange{Start: 10}}}},
+		{ID: "3", Severity: SeverityHigh, Title: "Line 30", Locations: []Location{{Path: "x.go", Lines: LineRange{Start: 30}}}},
+	}
+	SortFindings(findings)
+
+	if findings[0].Locations[0].Lines.Start != 10 {
+		t.Errorf("findings[0].Lines.Start = %d, want 10", findings[0].Locations[0].Lines.Start)
+	}
+	if findings[1].Locations[0].Lines.Start != 30 {
+		t.Errorf("findings[1].Lines.Start = %d, want 30", findings[1].Locations[0].Lines.Start)
+	}
+	if findings[2].Locations[0].Lines.Start != 50 {
+		t.Errorf("findings[2].Lines.Start = %d, want 50", findings[2].Locations[0].Lines.Start)
+	}
+}
+
+func TestSortFindings_SingleFinding(t *testing.T) {
+	findings := []Finding{
+		{ID: "1", Severity: SeverityHigh, Title: "Only", Locations: []Location{{Path: "a.go", Lines: LineRange{Start: 1}}}},
+	}
+	// Must not panic, must leave the single element in place.
+	SortFindings(findings)
+	if len(findings) != 1 {
+		t.Errorf("got %d findings, want 1", len(findings))
+	}
+	if findings[0].Title != "Only" {
+		t.Errorf("findings[0].Title = %q, want Only", findings[0].Title)
+	}
+}
+
+func TestSortFindings_NilSlice(t *testing.T) {
+	// Must not panic.
+	SortFindings(nil)
+}
+
+func TestSortFindings_EmptySlice(t *testing.T) {
+	// Must not panic.
+	SortFindings([]Finding{})
+}
+
+func TestSortFindings_NoLocations(t *testing.T) {
+	// Findings with no Locations use path="" and line=0 as the sort key.
+	// "" < any non-empty path alphabetically, so they sort first within the
+	// same severity — verify the invariant: no panic, correct order.
+	findings := []Finding{
+		{ID: "1", Severity: SeverityLow, Title: "Has location", Locations: []Location{{Path: "b.go", Lines: LineRange{Start: 5}}}},
+		{ID: "2", Severity: SeverityLow, Title: "No location"},
+	}
+	SortFindings(findings)
+
+	if len(findings) != 2 {
+		t.Fatalf("got %d findings, want 2", len(findings))
+	}
+	// "" < "b.go", so the no-location finding sorts first within the same severity.
+	if findings[0].Title != "No location" {
+		t.Errorf("findings[0].Title = %q, want No location (empty path sorts first)", findings[0].Title)
+	}
+	if findings[1].Title != "Has location" {
+		t.Errorf("findings[1].Title = %q, want Has location", findings[1].Title)
+	}
+}

@@ -420,7 +420,14 @@ func compareProvenance(models []string) []Provenance {
 
 func cloneReport(report *Report) *Report {
 	clone := *report
-	clone.Findings = append([]Finding(nil), report.Findings...)
+	clone.Findings = make([]Finding, len(report.Findings))
+	for i, f := range report.Findings {
+		cf := f
+		cf.Locations = append([]Location(nil), f.Locations...)
+		cf.Tags = append([]string(nil), f.Tags...)
+		cf.References = append([]string(nil), f.References...)
+		clone.Findings[i] = cf
+	}
 	clone.Provenance = append([]Provenance(nil), report.Provenance...)
 	return &clone
 }
