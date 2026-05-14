@@ -148,6 +148,7 @@ func reviewPipeline(ctx context.Context, diff gitctx.DiffResult, cfg config.Conf
 				resp = resp2
 			}
 			findings = stampProvenance(findings, resp.Provider, resp.Model)
+			SortFindings(findings)
 		}
 
 		// Store in cache as rawFinding format so parseFindings can read it back
@@ -303,6 +304,8 @@ func RunCodebase(ctx context.Context, diff gitctx.DiffResult, cfg CodebaseConfig
 
 // BuildReport constructs a Report from diff metadata, findings, and timing info.
 // Report.Provenance is derived from the per-finding Provider/Model pairs.
+// Callers are expected to pass pre-sorted findings (reviewPipeline and
+// RunChunkedWithOptions both sort before calling BuildReport).
 func BuildReport(diff gitctx.DiffResult, findings []Finding, llmMs, totalMs int64) *Report {
 	if findings == nil {
 		findings = []Finding{}

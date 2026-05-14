@@ -2,6 +2,7 @@ package review
 
 import (
 	"fmt"
+	"path/filepath"
 	"strings"
 )
 
@@ -140,40 +141,40 @@ func BuildCodebaseUserPrompt(diff string, files []string, maxFindings int, maxFi
 	return b.String()
 }
 
-func detectLanguages(files []string) []string {
-	langMap := map[string]string{
-		".go":    "Go",
-		".py":    "Python",
-		".js":    "JavaScript",
-		".ts":    "TypeScript",
-		".tsx":   "TypeScript/React",
-		".jsx":   "JavaScript/React",
-		".rs":    "Rust",
-		".java":  "Java",
-		".rb":    "Ruby",
-		".cpp":   "C++",
-		".c":     "C",
-		".h":     "C/C++",
-		".cs":    "C#",
-		".php":   "PHP",
-		".swift": "Swift",
-		".kt":    "Kotlin",
-		".sql":   "SQL",
-		".sh":    "Shell",
-		".yaml":  "YAML",
-		".yml":   "YAML",
-		".json":  "JSON",
-		".tf":    "Terraform",
-	}
+// extLang maps file extension → language name. Keyed by exact extension so
+// filepath.Ext gives O(1) lookup per file instead of iterating all entries.
+var extLang = map[string]string{
+	".go":    "Go",
+	".py":    "Python",
+	".js":    "JavaScript",
+	".ts":    "TypeScript",
+	".tsx":   "TypeScript/React",
+	".jsx":   "JavaScript/React",
+	".rs":    "Rust",
+	".java":  "Java",
+	".rb":    "Ruby",
+	".cpp":   "C++",
+	".c":     "C",
+	".h":     "C/C++",
+	".cs":    "C#",
+	".php":   "PHP",
+	".swift": "Swift",
+	".kt":    "Kotlin",
+	".sql":   "SQL",
+	".sh":    "Shell",
+	".yaml":  "YAML",
+	".yml":   "YAML",
+	".json":  "JSON",
+	".tf":    "Terraform",
+}
 
+func detectLanguages(files []string) []string {
 	seen := make(map[string]bool)
 	var langs []string
 	for _, f := range files {
-		for ext, lang := range langMap {
-			if strings.HasSuffix(f, ext) && !seen[lang] {
-				seen[lang] = true
-				langs = append(langs, lang)
-			}
+		if lang, ok := extLang[filepath.Ext(f)]; ok && !seen[lang] {
+			seen[lang] = true
+			langs = append(langs, lang)
 		}
 	}
 	return langs

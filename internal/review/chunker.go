@@ -195,7 +195,7 @@ func RunChunkedWithOptions(ctx context.Context, chunks []Chunk, provider provide
 	// Deduplicate by finding ID
 	allFindings = DeduplicateFindings(allFindings)
 
-	// Sort by severity (high first), then by file path, then by line
+	// Sort by severity (high first), then by file path, then by line.
 	SortFindings(allFindings)
 
 	return allFindings, totalLLMMs, nil

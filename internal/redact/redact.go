@@ -8,47 +8,48 @@ import (
 
 const placeholder = "[REDACTED]"
 
-// secretPatterns are regex heuristics for common secret types.
-var secretPatterns = []*regexp.Regexp{
-	// Generic API keys (long hex/base64 strings after common key patterns)
-	regexp.MustCompile(`(?i)(api[_-]?key|apikey|api[_-]?secret)\s*[:=]\s*["']?([A-Za-z0-9/+=_-]{20,})["']?`),
-	// AWS access key IDs
-	regexp.MustCompile(`AKIA[0-9A-Z]{16}`),
-	// AWS secret access keys
-	regexp.MustCompile(`(?i)(aws[_-]?secret[_-]?access[_-]?key)\s*[:=]\s*["']?([A-Za-z0-9/+=]{40})["']?`),
-	// Generic secrets/tokens/passwords in assignments (quoted)
-	regexp.MustCompile(`(?i)(secret|token|password|passwd|credential)\s*[:=]\s*["']([^"']{8,})["']`),
-	// Generic secrets/tokens/passwords in assignments (unquoted)
-	regexp.MustCompile(`(?i)(secret|token|password|passwd|credential)\s*[:=]\s*([^\s"']{8,})`),
-	// Bearer tokens (including /, +, = in base64 tokens)
-	regexp.MustCompile(`(?i)Bearer\s+[A-Za-z0-9._/+=-]{20,}`),
-	// JWTs (three base64 segments separated by dots)
-	regexp.MustCompile(`eyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}`),
-	// Private key blocks
-	regexp.MustCompile(`-----BEGIN\s+(RSA\s+)?PRIVATE KEY-----`),
-	// GitHub tokens
-	regexp.MustCompile(`gh[pousr]_[A-Za-z0-9_]{36,}`),
-	// Slack tokens
-	regexp.MustCompile(`xox[bporas]-[A-Za-z0-9-]{10,}`),
-	// Anthropic API keys
-	regexp.MustCompile(`sk-ant-[A-Za-z0-9_-]{20,}`),
-	// OpenAI API keys
-	regexp.MustCompile(`sk-[A-Za-z0-9]{20,}`),
-	// Database connection strings with credentials
-	regexp.MustCompile(`(?i)(mongodb|postgres|postgresql|mysql|redis|amqp)://[^\s"']+:[^\s"'@]+@[^\s"']+`),
-	// Generic long hex strings that look like secrets (32+ chars in an assignment)
-	regexp.MustCompile(`(?i)(key|secret|token)\s*[:=]\s*["']?[0-9a-f]{32,}["']?`),
-}
+// combinedSecretPattern is a single alternation of all secret heuristics.
+// Each alternative uses (?i:...) to scope case-insensitivity to that branch
+// only, avoiding flag leakage across alternatives.
+// One pass over the input replaces all secret types simultaneously, compared
+// to 14 sequential full-text scans with the previous per-pattern approach.
+var combinedSecretPattern = regexp.MustCompile(
+	`(?:` +
+		// Generic API keys (long hex/base64 strings after common key patterns)
+		`(?i:(?:api[_-]?key|apikey|api[_-]?secret)\s*[:=]\s*["']?[A-Za-z0-9/+=_-]{20,}["']?)` + `|` +
+		// AWS access key IDs
+		`AKIA[0-9A-Z]{16}` + `|` +
+		// AWS secret access keys
+		`(?i:(?:aws[_-]?secret[_-]?access[_-]?key)\s*[:=]\s*["']?[A-Za-z0-9/+=]{40}["']?)` + `|` +
+		// Generic secrets/tokens/passwords in assignments (quoted form first to avoid false positives)
+		`(?i:(?:secret|token|password|passwd|credential)\s*[:=]\s*["'][^"']{8,}["'])` + `|` +
+		// Generic secrets/tokens/passwords in assignments (unquoted)
+		`(?i:(?:secret|token|password|passwd|credential)\s*[:=]\s*[^\s"']{8,})` + `|` +
+		// Bearer tokens (including /, +, = in base64 tokens)
+		`(?i:Bearer\s+[A-Za-z0-9._/+=-]{20,})` + `|` +
+		// JWTs (three base64 segments separated by dots)
+		`eyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}` + `|` +
+		// Private key blocks
+		`-----BEGIN\s+(?:RSA\s+)?PRIVATE KEY-----` + `|` +
+		// Anthropic API keys (before generic sk- to take priority)
+		`sk-ant-[A-Za-z0-9_-]{20,}` + `|` +
+		// GitHub tokens
+		`gh[pousr]_[A-Za-z0-9_]{36,}` + `|` +
+		// Slack tokens
+		`xox[bporas]-[A-Za-z0-9-]{10,}` + `|` +
+		// OpenAI API keys
+		`sk-[A-Za-z0-9]{20,}` + `|` +
+		// Database connection strings with credentials
+		`(?i:(?:mongodb|postgres|postgresql|mysql|redis|amqp)://[^\s"']+:[^\s"'@]+@[^\s"']+)` + `|` +
+		// Generic long hex strings that look like secrets (32+ chars in an assignment)
+		`(?i:(?:key|secret|token)\s*[:=]\s*["']?[0-9a-f]{32,}["']?)` +
+		`)`,
+)
 
 // Secrets replaces detected secrets in text with [REDACTED].
+// A single combined regex pass replaces all secret types at once.
 func Secrets(text string) string {
-	result := text
-	for _, pat := range secretPatterns {
-		result = pat.ReplaceAllStringFunc(result, func(match string) string {
-			return placeholder
-		})
-	}
-	return result
+	return combinedSecretPattern.ReplaceAllString(text, placeholder)
 }
 
 // ShouldRedactPath checks if a file path matches any of the redaction path patterns.

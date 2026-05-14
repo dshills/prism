@@ -107,7 +107,7 @@ func DefaultReviewOptions() ReviewOptions {
 
 func Review(ctx context.Context, opts ReviewOptions) (*ReviewResult, error) {
 	cfg := configFromOptions(opts)
-	diff, err := diffFromOptions(opts, cfg)
+	diff, err := diffFromOptions(ctx, opts, cfg)
 	if err != nil {
 		return nil, err
 	}
@@ -249,7 +249,7 @@ func configFromOptions(opts ReviewOptions) config.Config {
 	return cfg
 }
 
-func diffFromOptions(opts ReviewOptions, cfg config.Config) (gitctx.DiffResult, error) {
+func diffFromOptions(ctx context.Context, opts ReviewOptions, cfg config.Config) (gitctx.DiffResult, error) {
 	diffOpts := gitctx.DiffOptions{
 		ContextLines: cfg.ContextLines,
 		MaxDiffBytes: cfg.MaxDiffBytes,
@@ -270,21 +270,21 @@ func diffFromOptions(opts ReviewOptions, cfg config.Config) (gitctx.DiffResult, 
 		}
 		return gitctx.Snippet(opts.Snippet, path, opts.SnippetLang, opts.SnippetBase)
 	case ModeUnstaged:
-		return withRepoPath(opts.RepoPath, func() (gitctx.DiffResult, error) { return gitctx.Unstaged(diffOpts) })
+		return withRepoPath(opts.RepoPath, func() (gitctx.DiffResult, error) { return gitctx.Unstaged(ctx, diffOpts) })
 	case ModeStaged:
-		return withRepoPath(opts.RepoPath, func() (gitctx.DiffResult, error) { return gitctx.Staged(diffOpts) })
+		return withRepoPath(opts.RepoPath, func() (gitctx.DiffResult, error) { return gitctx.Staged(ctx, diffOpts) })
 	case ModeCommit:
 		if opts.Revision == "" {
 			return gitctx.DiffResult{}, fmt.Errorf("revision is required for commit mode")
 		}
-		return withRepoPath(opts.RepoPath, func() (gitctx.DiffResult, error) { return gitctx.Commit(opts.Revision, opts.Parent, diffOpts) })
+		return withRepoPath(opts.RepoPath, func() (gitctx.DiffResult, error) { return gitctx.Commit(ctx, opts.Revision, opts.Parent, diffOpts) })
 	case ModeRange:
 		if opts.Revision == "" {
 			return gitctx.DiffResult{}, fmt.Errorf("revision is required for range mode")
 		}
-		return withRepoPath(opts.RepoPath, func() (gitctx.DiffResult, error) { return gitctx.Range(opts.Revision, opts.MergeBase, diffOpts) })
+		return withRepoPath(opts.RepoPath, func() (gitctx.DiffResult, error) { return gitctx.Range(ctx, opts.Revision, opts.MergeBase, diffOpts) })
 	case ModeCodebase:
-		return withRepoPath(opts.RepoPath, func() (gitctx.DiffResult, error) { return gitctx.Codebase(diffOpts) })
+		return withRepoPath(opts.RepoPath, func() (gitctx.DiffResult, error) { return gitctx.Codebase(ctx, diffOpts) })
 	default:
 		return gitctx.DiffResult{}, fmt.Errorf("unsupported review mode: %s", mode)
 	}
@@ -348,7 +348,7 @@ func runPerCommit(ctx context.Context, opts ReviewOptions, cfg config.Config) (*
 			Exclude:      cfg.Exclude,
 		}
 		for _, commit := range commits {
-			diff, err := gitctx.Commit(commit.SHA, "", diffOpts)
+			diff, err := gitctx.Commit(ctx, commit.SHA, "", diffOpts)
 			if err != nil || strings.TrimSpace(diff.Diff) == "" {
 				continue
 			}
@@ -368,7 +368,7 @@ func runPerCommit(ctx context.Context, opts ReviewOptions, cfg config.Config) (*
 			allFindings = append(allFindings, report.Findings...)
 			totalLLMMs += report.Timing.LLMMs
 		}
-		meta, _ = gitctx.GetRepoMeta()
+		meta, _ = gitctx.GetRepoMeta(ctx)
 		return nil
 	})
 	if err != nil {

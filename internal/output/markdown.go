@@ -2,7 +2,6 @@ package output
 
 import (
 	"io"
-	"sort"
 	"strings"
 
 	"github.com/dshills/prism/internal/review"
@@ -44,11 +43,6 @@ func (m *MarkdownWriter) Write(w io.Writer, report *review.Report) error {
 		label := strings.ToUpper(string(sev))
 
 		ew.printf("<details>\n<summary>%s %s (%d)</summary>\n\n", icon, label, len(findings))
-
-		// Sort by file path within severity
-		sort.Slice(findings, func(i, j int) bool {
-			return mdFilePath(findings[i]) < mdFilePath(findings[j])
-		})
 
 		for _, f := range findings {
 			loc := mdPrimaryLocation(f)
@@ -123,13 +117,6 @@ func mdPrimaryLocation(f review.Finding) review.Location {
 		return f.Locations[0]
 	}
 	return review.Location{Path: "unknown"}
-}
-
-func mdFilePath(f review.Finding) string {
-	if len(f.Locations) > 0 {
-		return f.Locations[0].Path
-	}
-	return ""
 }
 
 func mdSeverityIcon(s review.Severity) string {

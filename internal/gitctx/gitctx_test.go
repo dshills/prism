@@ -1,6 +1,7 @@
 package gitctx
 
 import (
+	"context"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -188,7 +189,7 @@ func TestBuildResult_ExcludeBeforeTruncate(t *testing.T) {
 		MaxDiffBytes: 100, // Very small limit
 		Exclude:      []string{"vendor/**"},
 	}
-	result, err := buildResult(diff, "unstaged", "", opts)
+	result, err := buildResult(context.Background(), diff, "unstaged", "", opts)
 	if err != nil {
 		t.Fatalf("buildResult error: %v", err)
 	}
@@ -207,7 +208,7 @@ func TestBuildResult_Truncation(t *testing.T) {
 	opts := DiffOptions{
 		MaxDiffBytes: 50,
 	}
-	result, err := buildResult(diff, "unstaged", "", opts)
+	result, err := buildResult(context.Background(), diff, "unstaged", "", opts)
 	if err != nil {
 		t.Fatalf("buildResult error: %v", err)
 	}
@@ -218,7 +219,7 @@ func TestBuildResult_Truncation(t *testing.T) {
 
 func TestBuildResult_MetadataAndMode(t *testing.T) {
 	diff := "diff --git a/main.go b/main.go\n--- a/main.go\n+++ b/main.go\n@@ -1 +1 @@\n+ok\n"
-	result, err := buildResult(diff, "staged", "abc..def", DiffOptions{})
+	result, err := buildResult(context.Background(), diff, "staged", "abc..def", DiffOptions{})
 	if err != nil {
 		t.Fatalf("buildResult error: %v", err)
 	}
@@ -394,7 +395,7 @@ func TestCodebase(t *testing.T) {
 	}
 	defer func() { _ = os.Chdir(origDir) }()
 
-	result, err := Codebase(DiffOptions{})
+	result, err := Codebase(context.Background(), DiffOptions{})
 	if err != nil {
 		t.Fatalf("Codebase error: %v", err)
 	}
@@ -507,7 +508,7 @@ func TestCodebase_MaxDiffBytes(t *testing.T) {
 	}
 	defer func() { _ = os.Chdir(origDir) }()
 
-	result, err := Codebase(DiffOptions{MaxDiffBytes: 100})
+	result, err := Codebase(context.Background(), DiffOptions{MaxDiffBytes: 100})
 	if err != nil {
 		t.Fatalf("Codebase error: %v", err)
 	}
