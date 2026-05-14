@@ -250,6 +250,8 @@ Example `config.json`:
   "include": ["**/*"],
   "exclude": ["vendor/**", "**/*.gen.go", "**/dist/**"],
   "maxDiffBytes": 500000,
+  "maxConcurrency": 0,
+  "rateLimitRpm": 0,
   "rulesFile": "",
   "cache": {
     "enabled": true,
@@ -273,6 +275,8 @@ Example `config.json`:
 | `PRISM_FORMAT` | `format` |
 | `PRISM_MAX_FINDINGS` | `maxFindings` |
 | `PRISM_CONTEXT_LINES` | `contextLines` |
+| `PRISM_MAX_CONCURRENCY` | `maxConcurrency` — parallel LLM calls per review (0 = provider default) |
+| `PRISM_RATE_LIMIT_RPM` | `rateLimitRpm` — requests per minute cap (0 = provider default) |
 | `ANTHROPIC_API_KEY` | Anthropic provider |
 | `OPENAI_API_KEY` | OpenAI provider |
 | `GEMINI_API_KEY` | Gemini provider |
@@ -309,9 +313,9 @@ prism review staged --rules rules.json
 | Provider | Env Variable | Models |
 |----------|-------------|--------|
 | Anthropic | `ANTHROPIC_API_KEY` | claude-sonnet-4-6, claude-opus-4-6, claude-haiku-4-5 |
-| OpenAI | `OPENAI_API_KEY` | gpt-5.3-codex, gpt-5.2-codex, gpt-5.2, gpt-4.1-mini, o3-mini |
+| OpenAI | `OPENAI_API_KEY` | gpt-5.3-codex, gpt-5.3-codex-spark, gpt-5.2-codex, gpt-5.2, gpt-4.1-mini, o3-mini |
 | Gemini | `GEMINI_API_KEY` | gemini-3-flash-preview, gemini-3-pro-preview, gemini-2.5-flash, gemini-2.5-pro |
-| Ollama | — | llama3.3, llama3.2, llama3.1, codellama, qwen2.5-coder |
+| Ollama | — | llama3.3, llama3.2, llama3.1, codellama, qwen2.5-coder, deepseek-coder-v2 |
 
 ### Switching Providers
 
