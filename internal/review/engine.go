@@ -10,6 +10,7 @@ import (
 
 	"github.com/dshills/prism/internal/cache"
 	"github.com/dshills/prism/internal/config"
+	"github.com/dshills/prism/internal/diffutil"
 	"github.com/dshills/prism/internal/gitctx"
 	"github.com/dshills/prism/internal/providers"
 	"github.com/dshills/prism/internal/redact"
@@ -293,13 +294,158 @@ type CodebaseConfig struct {
 
 // RunCodebase executes a full-codebase review.
 func RunCodebase(ctx context.Context, diff gitctx.DiffResult, cfg CodebaseConfig) (*Report, error) {
-	maxPerFile := cfg.MaxFindingsPerFile
-	return reviewPipeline(ctx, diff, cfg.Config, reviewOpts{
-		alwaysChunk: true,
-		builder: func(chunkDiff string, files []string, c config.Config, r *Rules) (string, string) {
+	startTime := time.Now()
+
+	reviewCache, err := cache.New(cfg.Cache.Enabled, cfg.Cache.Dir, cfg.Cache.TTLSeconds)
+	if err != nil {
+		reviewCache, _ = cache.New(false, "", 0)
+	}
+
+	rules, err := LoadRules(cfg.RulesFile)
+	if err != nil {
+		return nil, fmt.Errorf("loading rules: %w", err)
+	}
+
+	return runCodebaseWithFileCache(ctx, diff, cfg, reviewCache, rules, startTime)
+}
+
+// runCodebaseWithFileCache implements per-file cache invalidation for codebase mode.
+// Each file section is checked individually against the cache; only cache misses
+// are sent to the LLM. Fresh findings are stored per-file so subsequent runs on
+// unchanged files return cached results without any LLM call.
+func runCodebaseWithFileCache(
+	ctx context.Context,
+	diff gitctx.DiffResult,
+	cfg CodebaseConfig,
+	reviewCache *cache.Cache,
+	rules *Rules,
+	startTime time.Time,
+) (*Report, error) {
+	var (
+		cachedFindings   []Finding
+		uncachedSections []string
+		freshFindings    []Finding
+		llmMs            int64
+	)
+
+	// Step 1: Apply redaction once; the same redacted text is used for both
+	// cache key derivation and LLM input (FR-5).
+	redactedDiff := diff.Diff
+	if cfg.Privacy.RedactSecrets {
+		redactedDiff = redact.Secrets(diff.Diff)
+	}
+
+	// Step 2: Nothing to review.
+	if strings.TrimSpace(redactedDiff) == "" {
+		return emptyReport(diff, startTime), nil
+	}
+
+	// Step 3: Split into per-file sections.
+	sections := diffutil.SplitSections(redactedDiff)
+
+	// Step 4: Check each section against the per-file cache.
+	for _, section := range sections {
+		key := cache.BuildCacheKey(cfg.Provider, cfg.Model, section)
+		if cached, ok := reviewCache.Get(key); ok {
+			parsed, err := parseFindings(cached)
+			if err == nil {
+				// Valid cache hit — collect findings and skip LLM for this file.
+				cachedFindings = append(cachedFindings, parsed...)
+				continue
+			}
+			// Corrupt entry: fall through and treat as a miss (FR-7).
+		}
+		uncachedSections = append(uncachedSections, section)
+	}
+
+	// Step 5: All files cached — skip LLM entirely (AC-1).
+	if len(uncachedSections) > 0 {
+		// Step 6: Build a filtered diff containing only cache-miss sections.
+		filteredDiff := strings.Join(uncachedSections, "")
+
+		// Step 7: Run the chunked review on uncached sections only.
+		provider, err := providers.New(cfg.Provider, cfg.Model)
+		if err != nil {
+			return nil, fmt.Errorf("creating provider: %w", err)
+		}
+
+		maxPerFile := cfg.MaxFindingsPerFile
+		codebaseBuilder := func(chunkDiff string, files []string, c config.Config, r *Rules) (string, string) {
 			return CodebaseSystemPrompt(), BuildCodebaseUserPrompt(chunkDiff, files, c.MaxFindings, maxPerFile, c.FailOn, r)
-		},
-	})
+		}
+
+		chunks := SplitIntoChunks(filteredDiff, cfg.MaxDiffBytes)
+		var err2 error
+		freshFindings, llmMs, err2 = RunChunkedWithOptions(ctx, chunks, provider, cfg.Config, rules, ChunkOptions{Builder: codebaseBuilder})
+		if err2 != nil {
+			return nil, fmt.Errorf("chunked review: %w", err2)
+		}
+
+		// Step 8: Store fresh findings per file for future cache hits (FR-4).
+		storeFindingsPerFile(reviewCache, uncachedSections, freshFindings, cfg.Provider, cfg.Model)
+	}
+
+	// Step 9: Merge cached and fresh findings.
+	allFindings := append(cachedFindings, freshFindings...)
+
+	// Step 10: Apply rules severity overrides.
+	allFindings = ApplySeverityOverrides(allFindings, rules)
+
+	// Step 11: Deduplicate (safety net for any cross-chunk duplicates).
+	allFindings = DeduplicateFindings(allFindings)
+
+	// Step 12: Sort high → medium → low, then by path, then by line.
+	SortFindings(allFindings)
+
+	// Step 13: Enforce MaxFindings on the merged set (FR-9).
+	if cfg.MaxFindings > 0 && len(allFindings) > cfg.MaxFindings {
+		allFindings = allFindings[:cfg.MaxFindings]
+	}
+
+	return BuildReport(diff, allFindings, llmMs, time.Since(startTime).Milliseconds()), nil
+}
+
+// storeFindingsPerFile stores fresh LLM findings into the cache at per-file
+// granularity. Each section gets its own cache entry keyed on
+// hash(provider, model, sectionText) so only the changed file is a miss on
+// the next run.
+//
+// If ANY finding in the batch has no primary path the entire batch is left
+// uncached — we cannot attribute unattributable findings to a specific file,
+// and silently dropping them would cause them to disappear from subsequent
+// reports (FR-4, plan Design Decisions).
+//
+// All write errors are silently ignored (FR-7).
+func storeFindingsPerFile(reviewCache *cache.Cache, sections []string, findings []Finding, provider, model string) {
+	// Guard: if any finding lacks a primary path, skip the entire batch.
+	for _, f := range findings {
+		if len(f.Locations) == 0 || f.Locations[0].Path == "" {
+			return
+		}
+	}
+
+	// Group findings by primary file path.
+	byPath := make(map[string][]Finding)
+	for _, f := range findings {
+		path := f.Locations[0].Path
+		byPath[path] = append(byPath[path], f)
+	}
+
+	// Write one cache entry per section. Sections with no findings are stored
+	// as "[]" so they produce cache hits on the next run (FR-4, AC-5).
+	for _, section := range sections {
+		path := diffutil.PathFromSection(section)
+		if path == "" {
+			continue
+		}
+		key := cache.BuildCacheKey(provider, model, section)
+		raw := findingsToRaw(byPath[path]) // nil slice marshals as JSON []
+		data, err := json.Marshal(raw)
+		if err != nil {
+			continue
+		}
+		_ = reviewCache.Put(key, string(data))
+	}
 }
 
 // BuildReport constructs a Report from diff metadata, findings, and timing info.
