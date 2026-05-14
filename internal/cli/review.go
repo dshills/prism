@@ -109,7 +109,7 @@ func splitComma(s string) []string {
 	return result
 }
 
-func runReview(diff gitctx.DiffResult, cfg config.Config) {
+func runReview(ctx context.Context, diff gitctx.DiffResult, cfg config.Config) {
 	if flagNoRedact {
 		cfg.Privacy.RedactSecrets = false
 		fmt.Fprintln(os.Stderr, "WARNING: secret redaction is disabled")
@@ -122,8 +122,6 @@ func runReview(diff gitctx.DiffResult, cfg config.Config) {
 	} else if len(cfg.Compare) > 0 {
 		compareModels = cfg.Compare
 	}
-
-	ctx := context.Background()
 
 	var report *review.Report
 	var err error
@@ -218,7 +216,7 @@ func compareProvenance(models []string) []review.Provenance {
 	return out
 }
 
-func runPerCommitReview(revRange string, cfg config.Config) {
+func runPerCommitReview(ctx context.Context, revRange string, cfg config.Config) {
 	if flagNoRedact {
 		cfg.Privacy.RedactSecrets = false
 		fmt.Fprintln(os.Stderr, "WARNING: secret redaction is disabled")
@@ -235,7 +233,7 @@ func runPerCommitReview(revRange string, cfg config.Config) {
 		return
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	startTime := time.Now()
 
@@ -249,8 +247,11 @@ func runPerCommitReview(revRange string, cfg config.Config) {
 		}
 		fmt.Fprintf(os.Stderr, "Reviewing commit %d/%d: %s %s\n", i+1, len(commits), shortSHA, c.Subject)
 
-		diff, err := gitctx.Commit(c.SHA, "", buildDiffOpts(cfg))
+		diff, err := gitctx.Commit(ctx, c.SHA, "", buildDiffOpts(cfg))
 		if err != nil {
+			if ctx.Err() != nil {
+				return // context cancelled — stop immediately
+			}
 			fmt.Fprintf(os.Stderr, "  Skipping (error getting diff): %v\n", err)
 			continue
 		}
@@ -265,6 +266,9 @@ func runPerCommitReview(revRange string, cfg config.Config) {
 				fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 				exitCode = ExitAuthError
 				return
+			}
+			if ctx.Err() != nil {
+				return // context cancelled — stop immediately
 			}
 			fmt.Fprintf(os.Stderr, "  Error reviewing commit %s: %v\n", shortSHA, err)
 			continue
@@ -291,7 +295,7 @@ func runPerCommitReview(revRange string, cfg config.Config) {
 	}
 
 	// Build a synthetic DiffResult for the aggregate report
-	meta, _ := gitctx.GetRepoMeta()
+	meta, _ := gitctx.GetRepoMeta(ctx)
 	synthDiff := gitctx.DiffResult{
 		Mode:  "range",
 		Range: revRange,
@@ -331,13 +335,13 @@ var reviewUnstagedCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		diff, err := gitctx.Unstaged(buildDiffOpts(cfg))
+		diff, err := gitctx.Unstaged(cmd.Context(), buildDiffOpts(cfg))
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 			exitCode = ExitRuntimeError
 			return nil
 		}
-		runReview(diff, cfg)
+		runReview(cmd.Context(), diff, cfg)
 		return nil
 	},
 }
@@ -350,13 +354,13 @@ var reviewStagedCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		diff, err := gitctx.Staged(buildDiffOpts(cfg))
+		diff, err := gitctx.Staged(cmd.Context(), buildDiffOpts(cfg))
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 			exitCode = ExitRuntimeError
 			return nil
 		}
-		runReview(diff, cfg)
+		runReview(cmd.Context(), diff, cfg)
 		return nil
 	},
 }
@@ -374,13 +378,13 @@ var reviewCommitCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		diff, err := gitctx.Commit(args[0], flagParent, buildDiffOpts(cfg))
+		diff, err := gitctx.Commit(cmd.Context(), args[0], flagParent, buildDiffOpts(cfg))
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 			exitCode = ExitRuntimeError
 			return nil
 		}
-		runReview(diff, cfg)
+		runReview(cmd.Context(), diff, cfg)
 		return nil
 	},
 }
@@ -407,17 +411,17 @@ var reviewRangeCmd = &cobra.Command{
 		}
 
 		if flagPerCommit {
-			runPerCommitReview(args[0], cfg)
+			runPerCommitReview(cmd.Context(), args[0], cfg)
 			return nil
 		}
 
-		diff, err := gitctx.Range(args[0], flagMergeBase, buildDiffOpts(cfg))
+		diff, err := gitctx.Range(cmd.Context(), args[0], flagMergeBase, buildDiffOpts(cfg))
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 			exitCode = ExitRuntimeError
 			return nil
 		}
-		runReview(diff, cfg)
+		runReview(cmd.Context(), diff, cfg)
 		return nil
 	},
 }
@@ -467,7 +471,7 @@ var reviewSnippetCmd = &cobra.Command{
 			exitCode = ExitRuntimeError
 			return nil
 		}
-		runReview(diff, cfg)
+		runReview(cmd.Context(), diff, cfg)
 		return nil
 	},
 }
@@ -480,18 +484,18 @@ var reviewCodebaseCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		diff, err := gitctx.Codebase(buildDiffOpts(cfg))
+		diff, err := gitctx.Codebase(cmd.Context(), buildDiffOpts(cfg))
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 			exitCode = ExitRuntimeError
 			return nil
 		}
-		runCodebaseReview(diff, cfg)
+		runCodebaseReview(cmd.Context(), diff, cfg)
 		return nil
 	},
 }
 
-func runCodebaseReview(diff gitctx.DiffResult, cfg config.Config) {
+func runCodebaseReview(ctx context.Context, diff gitctx.DiffResult, cfg config.Config) {
 	if flagNoRedact {
 		cfg.Privacy.RedactSecrets = false
 		fmt.Fprintln(os.Stderr, "WARNING: secret redaction is disabled")
@@ -503,8 +507,6 @@ func runCodebaseReview(diff gitctx.DiffResult, cfg config.Config) {
 	} else if len(cfg.Compare) > 0 {
 		compareModels = cfg.Compare
 	}
-
-	ctx := context.Background()
 
 	var report *review.Report
 	var err error

@@ -3,7 +3,6 @@ package output
 import (
 	"fmt"
 	"io"
-	"sort"
 	"strings"
 
 	"github.com/dshills/prism/internal/review"
@@ -53,13 +52,6 @@ func (t *TextWriter) Write(w io.Writer, report *review.Report) error {
 		label := strings.ToUpper(string(sev))
 		ew.printf("\n%s %s\n", severityIcon(sev), label)
 		ew.println(strings.Repeat("─", 40))
-
-		// Sort by file path within severity
-		sort.Slice(findings, func(i, j int) bool {
-			pi := filePath(findings[i])
-			pj := filePath(findings[j])
-			return pi < pj
-		})
 
 		for _, f := range findings {
 			loc := primaryLocation(f)
@@ -128,13 +120,6 @@ func primaryLocation(f review.Finding) review.Location {
 		return f.Locations[0]
 	}
 	return review.Location{Path: "unknown"}
-}
-
-func filePath(f review.Finding) string {
-	if len(f.Locations) > 0 {
-		return f.Locations[0].Path
-	}
-	return ""
 }
 
 func severityIcon(s review.Severity) string {

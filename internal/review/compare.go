@@ -45,6 +45,13 @@ func RunCompareWithOptions(ctx context.Context, diff string, files []string, mod
 		builder = defaultPromptBuilder
 	}
 
+	// Redact once before launching goroutines — all models receive the same
+	// read-only string, avoiding N redundant regex passes over the same diff.
+	redactedDiff := diff
+	if cfg.Privacy.RedactSecrets {
+		redactedDiff = redact.Secrets(diff)
+	}
+
 	results := make([]compareModelResult, len(models))
 	var wg sync.WaitGroup
 	var totalLLMMs int64
@@ -65,11 +72,6 @@ func RunCompareWithOptions(ctx context.Context, diff string, files []string, mod
 			if err != nil {
 				results[i] = compareModelResult{label: spec, err: fmt.Errorf("%s: %w", spec, err)}
 				return
-			}
-
-			redactedDiff := diff
-			if cfg.Privacy.RedactSecrets {
-				redactedDiff = redact.Secrets(redactedDiff)
 			}
 
 			sysPr, userPr := builder(redactedDiff, files, cfg, rules)
@@ -199,6 +201,9 @@ func mergeResults(results []compareModelResult, totalLLMMs int64) *CompareResult
 			}
 		}
 	}
+
+	SortFindings(cr.Consensus)
+	SortFindings(cr.All)
 
 	return cr
 }

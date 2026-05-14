@@ -1,12 +1,16 @@
 package gitctx
 
 import (
+	"bytes"
+	"context"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/dshills/prism/internal/diffutil"
 )
@@ -35,84 +39,116 @@ type RepoMeta struct {
 	Branch string
 }
 
+// repoMetaTimeout is the per-command deadline for GetRepoMeta git calls.
+const repoMetaTimeout = 10 * time.Second
+
 // GetRepoMeta collects repository metadata from git.
-func GetRepoMeta() (RepoMeta, error) {
-	root, err := gitOutput("rev-parse", "--show-toplevel")
-	if err != nil {
-		return RepoMeta{}, fmt.Errorf("not a git repository: %w", err)
+// The three rev-parse calls run concurrently to cut latency.
+// Each subprocess is bounded by repoMetaTimeout to prevent indefinite hangs
+// caused by locked indexes or filesystem issues.
+func GetRepoMeta(ctx context.Context) (RepoMeta, error) {
+	type gitResult struct {
+		val string
+		err error
 	}
-	head, err := gitOutput("rev-parse", "HEAD")
-	if err != nil {
-		head = "" // new repo with no commits
+
+	// Bound all three subprocess calls with a single shared deadline.
+	tCtx, tCancel := context.WithTimeout(ctx, repoMetaTimeout)
+	defer tCancel()
+
+	rootCh := make(chan gitResult, 1)
+	headCh := make(chan gitResult, 1)
+	branchCh := make(chan gitResult, 1)
+
+	go func() { v, e := gitOutputCtx(tCtx, "rev-parse", "--show-toplevel"); rootCh <- gitResult{v, e} }()
+	go func() { v, e := gitOutputCtx(tCtx, "rev-parse", "HEAD"); headCh <- gitResult{v, e} }()
+	go func() {
+		v, e := gitOutputCtx(tCtx, "rev-parse", "--abbrev-ref", "HEAD")
+		branchCh <- gitResult{v, e}
+	}()
+
+	// Buffered channels (cap 1) guarantee goroutines exit once they send,
+	// so early return on root error does not leak goroutines.
+	rootRes := <-rootCh
+	if rootRes.err != nil {
+		return RepoMeta{}, fmt.Errorf("not a git repository: %w", rootRes.err)
 	}
-	branch, err := gitOutput("rev-parse", "--abbrev-ref", "HEAD")
-	if err != nil {
-		branch = ""
+
+	headRes := <-headCh
+	branchRes := <-branchCh
+
+	head := ""
+	if headRes.err == nil {
+		head = strings.TrimSpace(headRes.val)
+	}
+	branch := ""
+	if branchRes.err == nil {
+		branch = strings.TrimSpace(branchRes.val)
 	}
 	return RepoMeta{
-		Root:   strings.TrimSpace(root),
-		Head:   strings.TrimSpace(head),
-		Branch: strings.TrimSpace(branch),
+		Root:   strings.TrimSpace(rootRes.val),
+		Head:   head,
+		Branch: branch,
 	}, nil
 }
 
 // Unstaged returns the diff of working tree vs index.
-func Unstaged(opts DiffOptions) (DiffResult, error) {
+func Unstaged(ctx context.Context, opts DiffOptions) (DiffResult, error) {
 	args := buildDiffArgs(opts)
-	diff, err := gitOutput(append([]string{"diff"}, args...)...)
+	diff, err := gitOutputCtx(ctx, append([]string{"diff"}, args...)...)
 	if err != nil {
 		return DiffResult{}, fmt.Errorf("git diff: %w", err)
 	}
-	return buildResult(diff, "unstaged", "", opts)
+	return buildResult(ctx, diff, "unstaged", "", opts)
 }
 
 // Staged returns the diff of index vs HEAD.
-func Staged(opts DiffOptions) (DiffResult, error) {
+func Staged(ctx context.Context, opts DiffOptions) (DiffResult, error) {
 	args := buildDiffArgs(opts)
-	diff, err := gitOutput(append([]string{"diff", "--cached"}, args...)...)
+	diff, err := gitOutputCtx(ctx, append([]string{"diff", "--cached"}, args...)...)
 	if err != nil {
 		return DiffResult{}, fmt.Errorf("git diff --cached: %w", err)
 	}
-	return buildResult(diff, "staged", "", opts)
+	return buildResult(ctx, diff, "staged", "", opts)
 }
 
 // Commit returns the diff for a specific commit vs its parent.
-func Commit(sha string, parent string, opts DiffOptions) (DiffResult, error) {
+func Commit(ctx context.Context, sha string, parent string, opts DiffOptions) (DiffResult, error) {
 	args := buildDiffArgs(opts)
 	if parent != "" {
 		cmdArgs := append([]string{"diff", parent, sha}, args...)
-		diff, err := gitOutput(cmdArgs...)
+		diff, err := gitOutputCtx(ctx, cmdArgs...)
 		if err != nil {
 			return DiffResult{}, fmt.Errorf("git diff %s %s: %w", parent, sha, err)
 		}
-		return buildResult(diff, "commit", sha, opts)
+		return buildResult(ctx, diff, "commit", sha, opts)
 	}
 	cmdArgs := append([]string{"diff", sha + "~1", sha}, args...)
-	diff, err := gitOutput(cmdArgs...)
+	diff, err := gitOutputCtx(ctx, cmdArgs...)
 	if err != nil {
 		// Might be initial commit, try show
 		showArgs := append([]string{"show", "--format=", sha, "--"}, args[1:]...) // skip -U flag reuse
-		diff, err = gitOutput(showArgs...)
+		diff, err = gitOutputCtx(ctx, showArgs...)
 		if err != nil {
 			return DiffResult{}, fmt.Errorf("git show %s: %w", sha, err)
 		}
 	}
-	return buildResult(diff, "commit", sha, opts)
+	return buildResult(ctx, diff, "commit", sha, opts)
 }
 
 // Range returns the combined diff for a revision range.
-func Range(revRange string, mergeBase bool, opts DiffOptions) (DiffResult, error) {
+func Range(ctx context.Context, revRange string, mergeBase bool, opts DiffOptions) (DiffResult, error) {
 	args := buildDiffArgs(opts)
 	diffRange := revRange
 	if mergeBase && strings.Contains(revRange, "..") && !strings.Contains(revRange, "...") {
 		diffRange = strings.Replace(revRange, "..", "...", 1)
 	}
 	cmdArgs := append([]string{"diff", diffRange}, args...)
-	diff, err := gitOutput(cmdArgs...)
+	diff, err := gitOutputCtx(ctx, cmdArgs...)
 	if err != nil {
 		return DiffResult{}, fmt.Errorf("git diff %s: %w", revRange, err)
 	}
-	return buildResult(diff, "range", revRange, opts)
+	return buildResult(ctx, diff, "range", revRange, opts)
 }
 
 // Snippet wraps raw content as a "diff" for review. If base is provided, computes a real diff.
@@ -187,8 +223,8 @@ func buildDiffArgs(opts DiffOptions) []string {
 	return args
 }
 
-func buildResult(diff, mode, rangeStr string, opts DiffOptions) (DiffResult, error) {
-	meta, err := GetRepoMeta()
+func buildResult(ctx context.Context, diff, mode, rangeStr string, opts DiffOptions) (DiffResult, error) {
+	meta, err := GetRepoMeta(ctx)
 	if err != nil {
 		meta = RepoMeta{}
 	}
@@ -314,17 +350,29 @@ func WalkFiles(opts DiffOptions) ([]string, error) {
 	return files, nil
 }
 
-// isBinary detects whether a file is binary using git diff --numstat.
-// Binary files show "-\t-\t" for added/removed lines.
+// isBinary detects binary files by scanning for null bytes in the first 512
+// bytes — the same heuristic git uses. This avoids spawning a git subprocess
+// per file (previously O(n) process launches for codebase mode).
 func isBinary(path string) bool {
-	out, _ := gitOutput("diff", "--no-index", "--numstat", "/dev/null", path)
-	return strings.HasPrefix(strings.TrimSpace(out), "-\t-\t")
+	f, err := os.Open(path)
+	if err != nil {
+		return true // treat unreadable files as binary to skip them
+	}
+	var buf [512]byte
+	n, readErr := f.Read(buf[:])
+	_ = f.Close()
+	// io.EOF with n==0 means the file is empty — not binary.
+	// Any other read error with no bytes means unreadable; treat as binary to skip.
+	if readErr != nil && n == 0 {
+		return readErr != io.EOF
+	}
+	return bytes.IndexByte(buf[:n], 0) >= 0
 }
 
 // Codebase reads all tracked source files and assembles them as
 // synthetic unified diffs. Returns a DiffResult with Mode="codebase".
-func Codebase(opts DiffOptions) (DiffResult, error) {
-	meta, err := GetRepoMeta()
+func Codebase(ctx context.Context, opts DiffOptions) (DiffResult, error) {
+	meta, err := GetRepoMeta(ctx)
 	if err != nil {
 		return DiffResult{}, err
 	}
@@ -435,6 +483,23 @@ func gitOutput(args ...string) (string, error) {
 			return string(out), fmt.Errorf("%s: %s", err, string(exitErr.Stderr))
 		}
 		return "", err
+	}
+	return string(out), nil
+}
+
+// gitOutputCtx runs a git command respecting ctx cancellation and deadlines.
+// Stderr is captured explicitly so error messages include git's diagnostics.
+func gitOutputCtx(ctx context.Context, args ...string) (string, error) {
+	var stderr bytes.Buffer
+	cmd := exec.CommandContext(ctx, "git", args...)
+	cmd.Stderr = &stderr
+	out, err := cmd.Output()
+	if err != nil {
+		msg := strings.TrimSpace(stderr.String())
+		if msg != "" {
+			return string(out), fmt.Errorf("%w: %s", err, msg)
+		}
+		return string(out), err
 	}
 	return string(out), nil
 }
