@@ -18,7 +18,7 @@ Prism is **diff-centric** — it reviews only what changed, not your entire repo
 - **Pre-commit hook**: install/uninstall with `prism hook install`
 - **GitHub PR integration**: post review findings as PR comments
 - **Caching**: file-based cache with SHA-256 keys and configurable TTL
-- **Large diff handling**: automatic chunking with bounded parallel LLM calls
+- **Large diff handling**: diffs over `chunkBytes` (24 KB) are split into chunks of whole files, directories kept together, reviewed with bounded parallel LLM calls; each chunk's prompt lists the files in the other chunks so the model does not report them as missing
 
 ## Installation
 
@@ -188,6 +188,7 @@ All review subcommands accept these flags:
 | `--max-findings` | Maximum number of findings | `50` |
 | `--context-lines` | Context lines in diff | `3` |
 | `--max-diff-bytes` | Maximum diff size in bytes | `500000` |
+| `--chunk-bytes` | Target size of each review chunk a larger diff is split into | `24000` |
 | `--paths` | Include file path globs (comma-separated) | `**/*` |
 | `--exclude` | Exclude file path globs (comma-separated) | `vendor/**`, `**/*.gen.go`, `**/dist/**` |
 | `--rules` | Rules file path | |
@@ -250,6 +251,7 @@ Example `config.json`:
   "include": ["**/*"],
   "exclude": ["vendor/**", "**/*.gen.go", "**/dist/**"],
   "maxDiffBytes": 500000,
+  "chunkBytes": 24000,
   "maxConcurrency": 0,
   "rateLimitRpm": 0,
   "rulesFile": "",
@@ -275,6 +277,7 @@ Example `config.json`:
 | `PRISM_FORMAT` | `format` |
 | `PRISM_MAX_FINDINGS` | `maxFindings` |
 | `PRISM_CONTEXT_LINES` | `contextLines` |
+| `PRISM_CHUNK_BYTES` | `chunkBytes` — target size of each review chunk (default 24000). One prompt carrying a large diff gets a shallow review, so keep this small |
 | `PRISM_MAX_CONCURRENCY` | `maxConcurrency` — parallel LLM calls per review (0 = provider default) |
 | `PRISM_RATE_LIMIT_RPM` | `rateLimitRpm` — requests per minute cap (0 = provider default) |
 | `ANTHROPIC_API_KEY` | Anthropic provider |

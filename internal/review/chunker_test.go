@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/dshills/prism/internal/config"
@@ -71,14 +72,187 @@ func TestSplitIntoChunks_EmptyDiff(t *testing.T) {
 }
 
 func TestNeedsChunking(t *testing.T) {
-	small := strings.Repeat("x", ChunkThreshold-1)
-	if NeedsChunking(small) {
-		t.Error("Should not need chunking for small diff")
+	for _, tc := range []struct {
+		size, chunkBytes int
+		want             bool
+	}{
+		{DefaultChunkBytes, 0, false},    // unset → default; exactly one chunk
+		{DefaultChunkBytes + 1, 0, true}, // one byte over the default
+		{80000, 0, true},                 // the AHR-414 backend diff: must chunk
+		{5000, 4000, true},               // an explicit, smaller chunk size
+		{5000, 10000, false},
+	} {
+		if got := NeedsChunking(strings.Repeat("x", tc.size), tc.chunkBytes); got != tc.want {
+			t.Errorf("NeedsChunking(%d bytes, chunkBytes %d) = %v, want %v", tc.size, tc.chunkBytes, got, tc.want)
+		}
+	}
+}
+
+// section builds one file's diff section of roughly size bytes.
+func section(path string, size int) string {
+	head := fmt.Sprintf("diff --git a/%s b/%s\n--- a/%s\n+++ b/%s\n@@ -1 +1 @@\n", path, path, path, path)
+	body := "+" + strings.Repeat("x", max(0, size-len(head)-2)) + "\n"
+	return head + body
+}
+
+func chunkFiles(chunks []Chunk) [][]string {
+	out := make([][]string, len(chunks))
+	for i, c := range chunks {
+		out[i] = c.Files
+	}
+	return out
+}
+
+// A directory that fits in one chunk is never cut across two: when it would
+// not fit in the space left, it starts a fresh chunk.
+func TestSplitIntoChunks_KeepsDirectoriesTogether(t *testing.T) {
+	diff := section("pkg/a/one.go", 300) + section("pkg/a/two.go", 300) +
+		section("pkg/b/three.go", 300) + section("pkg/b/four.go", 300)
+	got := chunkFiles(SplitIntoChunks(diff, 1000))
+	want := [][]string{{"pkg/a/one.go", "pkg/a/two.go"}, {"pkg/b/three.go", "pkg/b/four.go"}}
+	if fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Errorf("chunks = %v, want %v", got, want)
+	}
+}
+
+// The AHR-414 shape that motivated the rule: a small directory first, then a
+// package that fits in a chunk but not in what is left. The package must not
+// be spread across the small directory's chunk and the next.
+func TestSplitIntoChunks_PackageNotSpreadAfterSmallDir(t *testing.T) {
+	diff := section("handler/h.go", 200) +
+		section("pedigree/bench_test.go", 300) + section("pedigree/pedigree.go", 500)
+	got := chunkFiles(SplitIntoChunks(diff, 900))
+	want := [][]string{{"handler/h.go"}, {"pedigree/bench_test.go", "pedigree/pedigree.go"}}
+	if fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Errorf("chunks = %v, want %v", got, want)
+	}
+}
+
+// A directory larger than a chunk is split by size alone.
+func TestSplitIntoChunks_OversizedDirectorySplitsBySize(t *testing.T) {
+	diff := section("big/a.go", 400) + section("big/b.go", 400) + section("big/c.go", 400)
+	got := chunkFiles(SplitIntoChunks(diff, 900))
+	want := [][]string{{"big/a.go", "big/b.go"}, {"big/c.go"}}
+	if fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Errorf("chunks = %v, want %v", got, want)
+	}
+}
+
+// A directory too big for any one chunk does not close the chunk before it
+// early: it would be split by size anyway, so it fills the space that is left.
+func TestSplitIntoChunks_OversizedDirectoryDoesNotFlushEarly(t *testing.T) {
+	diff := section("small/s.go", 200) +
+		section("big/a.go", 400) + section("big/b.go", 400) + section("big/c.go", 400)
+	got := chunkFiles(SplitIntoChunks(diff, 900))
+	want := [][]string{{"small/s.go", "big/a.go"}, {"big/b.go", "big/c.go"}}
+	if fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Errorf("chunks = %v, want %v", got, want)
+	}
+}
+
+// Small directories still share a chunk, rather than each becoming a tiny one.
+func TestSplitIntoChunks_SmallDirectoriesShare(t *testing.T) {
+	diff := section("a/x.go", 100) + section("b/y.go", 100) + section("c/z.go", 100)
+	if got := SplitIntoChunks(diff, 1000); len(got) != 1 {
+		t.Errorf("got %d chunks %v, want 1", len(got), chunkFiles(got))
+	}
+}
+
+// A file larger than a chunk is never split; it becomes a chunk of its own.
+func TestSplitIntoChunks_OversizedFileAlone(t *testing.T) {
+	diff := section("a/small.go", 200) + section("a/huge.go", 5000) + section("a/tail.go", 200)
+	got := chunkFiles(SplitIntoChunks(diff, 1000))
+	want := [][]string{{"a/small.go"}, {"a/huge.go"}, {"a/tail.go"}}
+	if fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Errorf("chunks = %v, want %v", got, want)
+	}
+}
+
+func TestOtherPartsNote(t *testing.T) {
+	chunks := []Chunk{
+		{Files: []string{"service/report.go"}},
+		{Files: []string{"cmd/server/main.go", "handler/inbreeding.go"}},
+	}
+	if note := otherPartsNote(chunks[:1], 0); note != "" {
+		t.Errorf("single chunk: note = %q, want none", note)
+	}
+	note := otherPartsNote(chunks, 0)
+	for _, want := range []string{"split into 2 parts and this is part 1", "- cmd/server/main.go", "- handler/inbreeding.go", "do not report something as missing"} {
+		if !strings.Contains(note, want) {
+			t.Errorf("note lacks %q:\n%s", want, note)
+		}
+	}
+	if strings.Contains(note, "service/report.go") {
+		t.Errorf("note lists the part's own file:\n%s", note)
 	}
 
-	large := strings.Repeat("x", ChunkThreshold+1)
-	if !NeedsChunking(large) {
-		t.Error("Should need chunking for large diff")
+	// Capped, with a count of the rest.
+	many := []Chunk{{Files: []string{"self.go"}}, {}}
+	for i := range maxContextFiles + 7 {
+		many[1].Files = append(many[1].Files, fmt.Sprintf("f%d.go", i))
+	}
+	note = otherPartsNote(many, 0)
+	if strings.Count(note, "\n- f") != maxContextFiles || !strings.Contains(note, "...and 7 more") {
+		t.Errorf("cap not applied: %d listed", strings.Count(note, "\n- f"))
+	}
+}
+
+// promptRecorder is a concurrency-safe provider that records each user prompt.
+type promptRecorder struct {
+	mu      sync.Mutex
+	prompts []string
+}
+
+func (p *promptRecorder) Review(_ context.Context, req providers.ReviewRequest) (providers.ReviewResponse, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.prompts = append(p.prompts, req.UserPrompt)
+	return providers.ReviewResponse{Content: "[]"}, nil
+}
+
+func (p *promptRecorder) Name() string { return "mock" }
+
+// Every chunk's prompt carries the other parts' files, for the default and for
+// a custom (codebase) builder alike.
+func TestRunChunked_PromptsListOtherParts(t *testing.T) {
+	chunks := []Chunk{
+		{Index: 0, Diff: "diff a", Files: []string{"a.go"}},
+		{Index: 1, Diff: "diff b", Files: []string{"b.go"}},
+	}
+	rec := &promptRecorder{}
+	builder := func(chunkDiff string, _ []string, _ config.Config, _ *Rules) (string, string) {
+		return "sys", "review " + chunkDiff
+	}
+	if _, _, err := RunChunkedWithOptions(context.Background(), chunks, rec, config.Default(), nil, ChunkOptions{Builder: builder}); err != nil {
+		t.Fatal(err)
+	}
+	if len(rec.prompts) != 2 {
+		t.Fatalf("got %d prompts, want 2", len(rec.prompts))
+	}
+	for _, p := range rec.prompts {
+		mine, other := "a.go", "b.go"
+		if strings.HasPrefix(p, "review diff b") {
+			mine, other = other, mine
+		}
+		if !strings.Contains(p, "- "+other) || strings.Contains(p, "- "+mine) {
+			t.Errorf("prompt should list %s and not %s:\n%s", other, mine, p)
+		}
+	}
+}
+
+// A different chunk size is a different review, so it must not share a cache
+// entry: results cached by the old single-prompt behaviour are not replayed.
+func TestDiffCacheKey_IncludesChunkSize(t *testing.T) {
+	a, b := config.Default(), config.Default()
+	b.ChunkBytes = a.ChunkBytes * 2
+	if diffCacheKey(a, "diff") == diffCacheKey(b, "diff") {
+		t.Error("cache key ignores chunk size")
+	}
+	c := config.Default()
+	c.ChunkBytes = 0 // unset means the default, so it keys like the default
+	a.ChunkBytes = DefaultChunkBytes
+	if diffCacheKey(a, "diff") != diffCacheKey(c, "diff") {
+		t.Error("unset chunk size should key the same as the default")
 	}
 }
 
@@ -102,14 +276,19 @@ func TestSplitIntoChunks_ChunkIndex(t *testing.T) {
 }
 
 // mockReviewer implements providers.Reviewer for testing.
+// mockReviewer returns responses in call order. Chunks are reviewed
+// concurrently, so the counter is guarded.
 type mockReviewer struct {
+	mu        sync.Mutex
 	responses []string
 	callCount int
 }
 
 func (m *mockReviewer) Review(_ context.Context, _ providers.ReviewRequest) (providers.ReviewResponse, error) {
+	m.mu.Lock()
 	idx := m.callCount
 	m.callCount++
+	m.mu.Unlock()
 	if idx < len(m.responses) {
 		return providers.ReviewResponse{Content: m.responses[idx]}, nil
 	}

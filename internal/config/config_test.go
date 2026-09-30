@@ -500,3 +500,42 @@ func TestLoad_Integration(t *testing.T) {
 		t.Errorf("MaxFindings = %d, want 50 (default)", cfg.MaxFindings)
 	}
 }
+
+// chunkBytes: default, environment, config key and CLI-style override.
+func TestChunkBytes(t *testing.T) {
+	if got := Default().ChunkBytes; got != 24000 {
+		t.Errorf("Default ChunkBytes = %d, want 24000", got)
+	}
+
+	t.Setenv("PRISM_CHUNK_BYTES", "12000")
+	cfg := Default()
+	if err := mergeEnv(&cfg); err != nil {
+		t.Fatal(err)
+	}
+	if cfg.ChunkBytes != 12000 {
+		t.Errorf("PRISM_CHUNK_BYTES: ChunkBytes = %d, want 12000", cfg.ChunkBytes)
+	}
+
+	t.Setenv("PRISM_CHUNK_BYTES", "lots")
+	if err := mergeEnv(&cfg); err == nil {
+		t.Error("PRISM_CHUNK_BYTES=lots should be an error")
+	}
+
+	if err := SetField(&cfg, "chunkBytes", "30000"); err != nil || cfg.ChunkBytes != 30000 {
+		t.Errorf("SetField chunkBytes: %v, ChunkBytes = %d", err, cfg.ChunkBytes)
+	}
+	if err := SetField(&cfg, "chunkBytes", "x"); err == nil {
+		t.Error("SetField chunkBytes=x should be an error")
+	}
+
+	mergeOverrides(&cfg, map[string]string{"chunkBytes": "8000"})
+	if cfg.ChunkBytes != 8000 {
+		t.Errorf("override: ChunkBytes = %d, want 8000", cfg.ChunkBytes)
+	}
+
+	dst := Default()
+	mergeFile(&dst, Config{ChunkBytes: 16000})
+	if dst.ChunkBytes != 16000 {
+		t.Errorf("config file: ChunkBytes = %d, want 16000", dst.ChunkBytes)
+	}
+}

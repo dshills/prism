@@ -15,6 +15,7 @@ func resetFlags() {
 	flagExclude = ""
 	flagContextLines = 0
 	flagMaxDiffBytes = 0
+	flagChunkBytes = 0
 	flagProvider = ""
 	flagModel = ""
 	flagCompare = ""

@@ -22,6 +22,7 @@ var (
 	flagExclude      string
 	flagContextLines int
 	flagMaxDiffBytes int
+	flagChunkBytes   int
 	flagProvider     string
 	flagModel        string
 	flagCompare      string
@@ -38,6 +39,7 @@ func addReviewFlags(cmd *cobra.Command) {
 	cmd.Flags().StringVar(&flagExclude, "exclude", "", "Exclude file path globs (comma-separated)")
 	cmd.Flags().IntVar(&flagContextLines, "context-lines", 0, "Number of context lines in diff")
 	cmd.Flags().IntVar(&flagMaxDiffBytes, "max-diff-bytes", 0, "Maximum diff size in bytes")
+	cmd.Flags().IntVar(&flagChunkBytes, "chunk-bytes", 0, "Target size in bytes of each chunk a large diff is split into for review (default 24000)")
 	cmd.Flags().StringVar(&flagProvider, "provider", "", "LLM provider (anthropic, openai, gemini)")
 	cmd.Flags().StringVar(&flagModel, "model", "", "Model name")
 	cmd.Flags().StringVar(&flagCompare, "compare", "", "Compare mode: comma-separated provider:model pairs")
@@ -71,6 +73,9 @@ func buildOverrides() map[string]string {
 	}
 	if flagMaxDiffBytes > 0 {
 		m["maxDiffBytes"] = fmt.Sprintf("%d", flagMaxDiffBytes)
+	}
+	if flagChunkBytes > 0 {
+		m["chunkBytes"] = fmt.Sprintf("%d", flagChunkBytes)
 	}
 	if flagRules != "" {
 		m["rulesFile"] = flagRules

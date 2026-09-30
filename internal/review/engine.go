@@ -47,6 +47,15 @@ func Run(ctx context.Context, diff gitctx.DiffResult, cfg config.Config) (*Repor
 	return reviewPipeline(ctx, diff, cfg, reviewOpts{})
 }
 
+// diffCacheKey keys a diff review's cached result. How the diff is chunked is
+// part of the key, both the size and the algorithm (chunkerVersion): the same
+// diff reviewed in different chunks is a different review, and results cached
+// under older chunking must not be replayed as current.
+func diffCacheKey(cfg config.Config, diff string) string {
+	return cache.BuildCacheKey(cfg.Provider, cfg.Model,
+		fmt.Sprintf("chunker=%d,chunkBytes=%d\n%s", chunkerVersion, effectiveChunkBytes(cfg.ChunkBytes), diff))
+}
+
 // reviewPipeline is the shared review flow: redact → cache → rules → LLM → cache write → overrides → limit → report.
 func reviewPipeline(ctx context.Context, diff gitctx.DiffResult, cfg config.Config, opts reviewOpts) (*Report, error) {
 	startTime := time.Now()
@@ -68,7 +77,7 @@ func reviewPipeline(ctx context.Context, diff gitctx.DiffResult, cfg config.Conf
 		reviewCache, _ = cache.New(false, "", 0)
 	}
 
-	cacheKey := cache.BuildCacheKey(cfg.Provider, cfg.Model, redactedDiff)
+	cacheKey := diffCacheKey(cfg, redactedDiff)
 
 	// Check cache
 	var findings []Finding
@@ -98,8 +107,8 @@ func reviewPipeline(ctx context.Context, diff gitctx.DiffResult, cfg config.Conf
 		}
 
 		// Use chunked review for large diffs or when always requested (codebase mode)
-		if opts.alwaysChunk || NeedsChunking(redactedDiff) {
-			chunks := SplitIntoChunks(redactedDiff, cfg.MaxDiffBytes)
+		if opts.alwaysChunk || NeedsChunking(redactedDiff, cfg.ChunkBytes) {
+			chunks := SplitIntoChunks(redactedDiff, cfg.ChunkBytes)
 			findings, llmMs, err = RunChunkedWithOptions(ctx, chunks, provider, cfg, rules, ChunkOptions{
 				Builder: opts.builder,
 			})
@@ -374,7 +383,7 @@ func runCodebaseWithFileCache(
 			return CodebaseSystemPrompt(), BuildCodebaseUserPrompt(chunkDiff, files, c.MaxFindings, maxPerFile, c.FailOn, r)
 		}
 
-		chunks := SplitIntoChunks(filteredDiff, cfg.MaxDiffBytes)
+		chunks := SplitIntoChunks(filteredDiff, cfg.ChunkBytes)
 		var err2 error
 		freshFindings, llmMs, err2 = RunChunkedWithOptions(ctx, chunks, provider, cfg.Config, rules, ChunkOptions{Builder: codebaseBuilder})
 		if err2 != nil {

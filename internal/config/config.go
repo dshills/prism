@@ -22,6 +22,7 @@ type Config struct {
 	Include        []string      `json:"include"`
 	Exclude        []string      `json:"exclude"`
 	MaxDiffBytes   int           `json:"maxDiffBytes"`
+	ChunkBytes     int           `json:"chunkBytes,omitempty"`
 	MaxConcurrency int           `json:"maxConcurrency,omitempty"`
 	RateLimitRPM   int           `json:"rateLimitRpm,omitempty"`
 	RulesFile      string        `json:"rulesFile,omitempty"`
@@ -54,6 +55,7 @@ func Default() Config {
 		Include:      []string{"**/*"},
 		Exclude:      []string{"vendor/**", "**/*.gen.go", "**/dist/**"},
 		MaxDiffBytes: 500000,
+		ChunkBytes:   24000,
 		Cache: CacheConfig{
 			Enabled:    true,
 			TTLSeconds: 86400,
@@ -181,6 +183,9 @@ func mergeFile(dst *Config, src Config) {
 	if src.MaxDiffBytes > 0 {
 		dst.MaxDiffBytes = src.MaxDiffBytes
 	}
+	if src.ChunkBytes > 0 {
+		dst.ChunkBytes = src.ChunkBytes
+	}
 	if src.MaxConcurrency > 0 {
 		dst.MaxConcurrency = src.MaxConcurrency
 	}
@@ -237,6 +242,13 @@ func mergeEnv(cfg *Config) error {
 		}
 		cfg.ContextLines = n
 	}
+	if v := os.Getenv("PRISM_CHUNK_BYTES"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil {
+			return fmt.Errorf("PRISM_CHUNK_BYTES must be an integer, got %q", v)
+		}
+		cfg.ChunkBytes = n
+	}
 	if v := os.Getenv("PRISM_MAX_CONCURRENCY"); v != "" {
 		n, err := strconv.Atoi(v)
 		if err != nil {
@@ -285,6 +297,11 @@ func mergeOverrides(cfg *Config, overrides map[string]string) {
 			cfg.MaxDiffBytes = n
 		}
 	}
+	if v, ok := overrides["chunkBytes"]; ok && v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			cfg.ChunkBytes = n
+		}
+	}
 	if v, ok := overrides["rulesFile"]; ok && v != "" {
 		cfg.RulesFile = v
 	}
@@ -322,6 +339,12 @@ func SetField(cfg *Config, key, value string) error {
 			return fmt.Errorf("maxDiffBytes must be an integer: %w", err)
 		}
 		cfg.MaxDiffBytes = n
+	case "chunkBytes":
+		n, err := strconv.Atoi(value)
+		if err != nil {
+			return fmt.Errorf("chunkBytes must be an integer: %w", err)
+		}
+		cfg.ChunkBytes = n
 	case "rulesFile":
 		cfg.RulesFile = value
 	default:
