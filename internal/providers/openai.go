@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 	"time"
@@ -57,8 +58,8 @@ func (o *OpenAI) Review(ctx context.Context, req ReviewRequest) (ReviewResponse,
 		Model:    o.model,
 		Messages: messages,
 	}
-	// GPT-5.x and o-series models require max_completion_tokens instead of max_tokens
-	if usesMaxCompletionTokens(o.model) {
+	// Newer OpenAI models reject max_tokens and require max_completion_tokens.
+	if usesMaxCompletionTokens(o.model, isOfficialOpenAI(o.baseURL)) {
 		body.MaxCompletionTokens = maxTokens
 	} else {
 		body.MaxTokens = maxTokens
@@ -137,13 +138,57 @@ type openaiRequest struct {
 	Temperature         *float64        `json:"temperature,omitempty"`
 }
 
-// usesMaxCompletionTokens returns true for models that require
-// max_completion_tokens instead of max_tokens.
-func usesMaxCompletionTokens(model string) bool {
-	return strings.HasPrefix(model, "gpt-5") ||
-		strings.HasPrefix(model, "o1") ||
-		strings.HasPrefix(model, "o3") ||
-		strings.HasPrefix(model, "o4")
+// legacyMaxTokensFamilies are the OpenAI model families that still take
+// max_tokens. Every family released after them (gpt-5, gpt-6, the o-series, ...)
+// requires max_completion_tokens, so naming the old families rather than the
+// new ones means a new model works without an edit here.
+var legacyMaxTokensFamilies = []string{"gpt-4", "gpt-3.5", "chatgpt-"}
+
+// modernOpenAIFamilies are the families known to require
+// max_completion_tokens. They are only consulted for a custom
+// PRISM_OPENAI_BASE_URL, where the model may be anything an OpenAI-compatible
+// server hosts.
+var modernOpenAIFamilies = []string{"gpt-5", "gpt-6", "o1", "o3", "o4"}
+
+// isOfficialOpenAI reports whether baseURL is OpenAI's own API, judged by host
+// so that an explicit PRISM_OPENAI_BASE_URL with a different path or a trailing
+// slash still counts. An empty baseURL is the default endpoint.
+func isOfficialOpenAI(baseURL string) bool {
+	if baseURL == "" {
+		return true
+	}
+	u, err := url.Parse(baseURL)
+	if err != nil {
+		return false
+	}
+	return strings.EqualFold(u.Hostname(), "api.openai.com")
+}
+
+// usesMaxCompletionTokens reports whether model takes max_completion_tokens
+// rather than max_tokens.
+//
+// On OpenAI's own endpoint (official), only the legacy families take
+// max_tokens, and everything else, including models released after this was
+// written, gets max_completion_tokens. On a custom OpenAI-compatible endpoint
+// the model may be a Llama or Mistral served by a server that only knows
+// max_tokens, so there only the known modern OpenAI families switch over.
+// Fine-tuned ids ("ft:gpt-4o-mini:org::id") are judged by their base model.
+func usesMaxCompletionTokens(model string, official bool) bool {
+	m := strings.TrimPrefix(strings.ToLower(model), "ft:")
+	if official {
+		for _, legacy := range legacyMaxTokensFamilies {
+			if strings.HasPrefix(m, legacy) {
+				return false
+			}
+		}
+		return true
+	}
+	for _, modern := range modernOpenAIFamilies {
+		if strings.HasPrefix(m, modern) {
+			return true
+		}
+	}
+	return false
 }
 
 type openaiMessage struct {
