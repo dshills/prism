@@ -22,7 +22,7 @@ Rules:
 1. Only review the changes shown in the diff. Do not comment on unchanged code.
 2. Focus on bugs, security issues, performance problems, and correctness. Avoid bikeshedding on style unless it impacts readability significantly.
 3. Be concise and actionable. Every finding must include a concrete suggestion.
-4. Reference line numbers from the diff hunks.
+4. Reference line numbers from the diff hunks, and quote the offending code in "evidence".
 5. Rate severity as "low", "medium", or "high".
 6. Rate your confidence from 0.0 to 1.0.
 7. Categorize each finding as one of: bug, security, performance, correctness, style, maintainability, testing, docs.
@@ -40,8 +40,11 @@ Each finding must have this exact structure:
   "path": "relative/file/path",
   "startLine": 1,
   "endLine": 1,
+  "evidence": "the exact line or lines of code that show the problem, copied verbatim from the input",
   "tags": ["optional", "tags"]
 }
+
+"evidence" is checked against the input: a finding whose quoted code does not appear in the file it names is discarded, so copy the code exactly rather than paraphrasing it.
 
 If there are no issues, respond with an empty array: []`
 
@@ -97,7 +100,7 @@ const codebaseSystemPromptText = `You are a strict, expert code reviewer. Your j
 Rules:
 1. Review the full source files provided. Look for bugs, security issues, performance problems, correctness issues, design flaws, and maintainability concerns.
 2. Be concise and actionable. Every finding must include a concrete suggestion.
-3. Reference line numbers from the source files.
+3. Reference line numbers from the source files, and quote the offending code in "evidence".
 4. Rate severity as "low", "medium", or "high".
 5. Rate your confidence from 0.0 to 1.0.
 6. Categorize each finding as one of: bug, security, performance, correctness, style, maintainability, testing, docs.
@@ -115,8 +118,11 @@ Each finding must have this exact structure:
   "path": "relative/file/path",
   "startLine": 1,
   "endLine": 1,
+  "evidence": "the exact line or lines of code that show the problem, copied verbatim from the input",
   "tags": ["optional", "tags"]
 }
+
+"evidence" is checked against the input: a finding whose quoted code does not appear in the file it names is discarded, so copy the code exactly rather than paraphrasing it.
 
 If there are no issues, respond with an empty array: []`
 

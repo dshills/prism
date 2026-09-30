@@ -26,8 +26,21 @@ func (m *MarkdownWriter) Write(w io.Writer, report *review.Report) error {
 	ew.printf("| Low      | %d    |\n", report.Summary.Counts.Low)
 	ew.printf("| **Total** | **%d** |\n\n", total)
 
+	// FR-2: what was reviewed, always.
+	if line := report.Coverage.Describe(report.Timing.LLMMs); line != "" {
+		ew.printf("_%s_\n\n", line)
+	}
+	if line := report.Coverage.IncompleteLine(); line != "" {
+		ew.printf("**%s**\n\n", line)
+	}
+
 	if total == 0 {
-		ew.println("No issues found. :white_check_mark:")
+		if report.Coverage.Incomplete() {
+			ew.println("No issues found in what was reviewed. :warning:")
+		} else {
+			ew.println("No issues found. :white_check_mark:")
+		}
+		writeMarkdownDiscarded(ew, report)
 		return ew.err
 	}
 
@@ -77,6 +90,7 @@ func (m *MarkdownWriter) Write(w io.Writer, report *review.Report) error {
 	ew.printf("*Reviewed in %dms (git: %dms, LLM: %dms)*\n",
 		report.Timing.TotalMs, report.Timing.GitMs, report.Timing.LLMMs)
 
+	writeMarkdownDiscarded(ew, report)
 	return ew.err
 }
 
@@ -181,3 +195,16 @@ func inferLang(path string) string {
 // The errWriter type is shared across the output package since
 // both text.go and markdown.go are in package output.
 // No need to redeclare it here - it's defined in text.go.
+
+// writeMarkdownDiscarded lists findings that failed verification (FR-7).
+func writeMarkdownDiscarded(ew *errWriter, report *review.Report) {
+	if len(report.Discarded) == 0 {
+		return
+	}
+	ew.printf("\n<details><summary>Discarded %d finding(s) that failed verification</summary>\n\n", len(report.Discarded))
+	for _, d := range report.Discarded {
+		loc := mdPrimaryLocation(d.Finding)
+		ew.printf("- `%s:%d` %s — %s\n", loc.Path, loc.Lines.Start, d.Finding.Title, d.Reason)
+	}
+	ew.println("\n</details>")
+}

@@ -27,9 +27,10 @@ const (
 	maxContextFiles = 200
 
 	// chunkerVersion is part of the diff cache key. Bump it whenever
-	// SplitIntoChunks or the per-chunk prompt changes, so that reviews cached
-	// under the old chunking are not replayed.
-	chunkerVersion = 3
+	// SplitIntoChunks, the per-chunk prompt or the system prompts change, so
+	// reviews cached under the old behaviour are not replayed. 4: findings
+	// quote their evidence (specs/SPEC-review-integrity.md FR-4).
+	chunkerVersion = 4
 )
 
 // effectiveChunkBytes returns chunkBytes, or DefaultChunkBytes when unset.
@@ -187,6 +188,13 @@ func RunChunkedWithRules(ctx context.Context, chunks []Chunk, provider providers
 
 // RunChunkedWithOptions reviews diff chunks in parallel with custom prompt construction.
 func RunChunkedWithOptions(ctx context.Context, chunks []Chunk, provider providers.Reviewer, cfg config.Config, rules *Rules, opts ChunkOptions) ([]Finding, int64, error) {
+	findings, llmMs, _, err := runChunkedCounted(ctx, chunks, provider, cfg, rules, opts)
+	return findings, llmMs, err
+}
+
+// runChunkedCounted is RunChunkedWithOptions that also returns how many model
+// calls were made, repair passes included, for the report's coverage.
+func runChunkedCounted(ctx context.Context, chunks []Chunk, provider providers.Reviewer, cfg config.Config, rules *Rules, opts ChunkOptions) ([]Finding, int64, int, error) {
 	builder := opts.Builder
 	if builder == nil {
 		builder = defaultPromptBuilder
@@ -213,6 +221,7 @@ func RunChunkedWithOptions(ctx context.Context, chunks []Chunk, provider provide
 	var wg sync.WaitGroup
 	sem := make(chan struct{}, concurrency)
 	var totalLLMMs int64
+	var calls int
 	var mu sync.Mutex
 
 	for i, chunk := range chunks {
@@ -241,6 +250,7 @@ func RunChunkedWithOptions(ctx context.Context, chunks []Chunk, provider provide
 
 			mu.Lock()
 			totalLLMMs += elapsed
+			calls++
 			mu.Unlock()
 
 			if err != nil {
@@ -260,6 +270,9 @@ func RunChunkedWithOptions(ctx context.Context, chunks []Chunk, provider provide
 					UserPrompt:   repairPrompt,
 					MaxTokens:    8192,
 				})
+				mu.Lock()
+				calls++
+				mu.Unlock()
 				if err2 != nil {
 					results[i] = result{index: i, err: fmt.Errorf("chunk %d repair: %w", i, err2)}
 					return
@@ -283,7 +296,7 @@ func RunChunkedWithOptions(ctx context.Context, chunks []Chunk, provider provide
 	var allFindings []Finding
 	for _, r := range results {
 		if r.err != nil {
-			return nil, totalLLMMs, r.err
+			return nil, totalLLMMs, calls, r.err
 		}
 		allFindings = append(allFindings, r.findings...)
 	}
@@ -294,7 +307,7 @@ func RunChunkedWithOptions(ctx context.Context, chunks []Chunk, provider provide
 	// Sort by severity (high first), then by file path, then by line.
 	SortFindings(allFindings)
 
-	return allFindings, totalLLMMs, nil
+	return allFindings, totalLLMMs, calls, nil
 }
 
 // DeduplicateFindings removes duplicate findings by ID.

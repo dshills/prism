@@ -215,6 +215,24 @@ func TestBuildResult_Truncation(t *testing.T) {
 	if !strings.Contains(result.Diff, "truncated") {
 		t.Error("Large diff should be truncated")
 	}
+	// FR-1: the cut is counted, and the reviewed size excludes the marker.
+	if want := len(diff) - 50; result.TruncatedBytes != want {
+		t.Errorf("TruncatedBytes = %d, want %d", result.TruncatedBytes, want)
+	}
+	if result.ReviewedBytes() != 50 {
+		t.Errorf("ReviewedBytes = %d, want 50", result.ReviewedBytes())
+	}
+}
+
+func TestBuildResult_NotTruncated(t *testing.T) {
+	diff := "diff --git a/main.go b/main.go\n+++ b/main.go\n+ok\n"
+	result, err := buildResult(context.Background(), diff, "unstaged", "", DiffOptions{MaxDiffBytes: 1000})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.TruncatedBytes != 0 || result.ReviewedBytes() != len(diff) {
+		t.Errorf("TruncatedBytes = %d, ReviewedBytes = %d", result.TruncatedBytes, result.ReviewedBytes())
+	}
 }
 
 func TestBuildResult_MetadataAndMode(t *testing.T) {

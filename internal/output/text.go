@@ -37,8 +37,12 @@ func (t *TextWriter) Write(w io.Writer, report *review.Report) error {
 	ew.println(strings.Repeat("─", 60))
 
 	if total == 0 {
-		ew.println("\nNo issues found. Looks good!")
-		return ew.err
+		if report.Coverage.Incomplete() {
+			ew.println("\nNo issues found in what was reviewed.")
+		} else {
+			ew.println("\nNo issues found. Looks good!")
+		}
+		return writeTextFooter(ew, report)
 	}
 
 	// Group by severity (high first), then by file
@@ -80,10 +84,30 @@ func (t *TextWriter) Write(w io.Writer, report *review.Report) error {
 		}
 	}
 
+	return writeTextFooter(ew, report)
+}
+
+// writeTextFooter prints what was reviewed and the timing. It runs for every
+// report, including one with no findings, so a clean result always shows that
+// (and how) a review happened (specs/SPEC-review-integrity.md FR-2).
+func writeTextFooter(ew *errWriter, report *review.Report) error {
+	// FR-7: findings that failed verification are listed, not hidden.
+	if n := len(report.Discarded); n > 0 {
+		ew.printf("\nDiscarded %d finding(s) that failed verification:\n", n)
+		for _, d := range report.Discarded {
+			loc := primaryLocation(d.Finding)
+			ew.printf("  %s:%d  %s — %s\n", loc.Path, loc.Lines.Start, d.Finding.Title, d.Reason)
+		}
+	}
 	ew.printf("\n%s\n", strings.Repeat("─", 60))
+	if line := report.Coverage.Describe(report.Timing.LLMMs); line != "" {
+		ew.println(line)
+	}
+	if line := report.Coverage.IncompleteLine(); line != "" {
+		ew.println(line)
+	}
 	ew.printf("Completed in %dms (git: %dms, LLM: %dms)\n",
 		report.Timing.TotalMs, report.Timing.GitMs, report.Timing.LLMMs)
-
 	return ew.err
 }
 

@@ -23,15 +23,19 @@ var (
 	flagContextLines int
 	flagMaxDiffBytes int
 	flagChunkBytes   int
-	flagProvider     string
-	flagModel        string
-	flagCompare      string
-	flagFormat       string
-	flagOut          string
-	flagFailOn       string
-	flagMaxFindings  int
-	flagRules        string
-	flagNoRedact     bool
+	// flagAllowIncomplete keeps exit 0 for an incomplete review (FR-3).
+	flagAllowIncomplete bool
+	// flagNoVerifyFindings turns off evidence and compile checks (FR-7).
+	flagNoVerifyFindings bool
+	flagProvider         string
+	flagModel            string
+	flagCompare          string
+	flagFormat           string
+	flagOut              string
+	flagFailOn           string
+	flagMaxFindings      int
+	flagRules            string
+	flagNoRedact         bool
 )
 
 func addReviewFlags(cmd *cobra.Command) {
@@ -40,6 +44,8 @@ func addReviewFlags(cmd *cobra.Command) {
 	cmd.Flags().IntVar(&flagContextLines, "context-lines", 0, "Number of context lines in diff")
 	cmd.Flags().IntVar(&flagMaxDiffBytes, "max-diff-bytes", 0, "Maximum diff size in bytes")
 	cmd.Flags().IntVar(&flagChunkBytes, "chunk-bytes", 0, "Target size in bytes of each chunk a large diff is split into for review (default 24000)")
+	cmd.Flags().BoolVar(&flagAllowIncomplete, "allow-incomplete", false, "Exit 0 even when part of the input was not reviewed (truncated diff, skipped commit)")
+	cmd.Flags().BoolVar(&flagNoVerifyFindings, "no-verify-findings", false, "Report findings without checking their quoted evidence or Go compile claims against the code")
 	cmd.Flags().StringVar(&flagProvider, "provider", "", "LLM provider (anthropic, openai, gemini)")
 	cmd.Flags().StringVar(&flagModel, "model", "", "Model name")
 	cmd.Flags().StringVar(&flagCompare, "compare", "", "Compare mode: comma-separated provider:model pairs")
@@ -76,6 +82,9 @@ func buildOverrides() map[string]string {
 	}
 	if flagChunkBytes > 0 {
 		m["chunkBytes"] = fmt.Sprintf("%d", flagChunkBytes)
+	}
+	if flagNoVerifyFindings {
+		m["verifyFindings"] = "false"
 	}
 	if flagRules != "" {
 		m["rulesFile"] = flagRules
@@ -153,16 +162,24 @@ func runReview(ctx context.Context, diff gitctx.DiffResult, cfg config.Config) {
 		exitCode = ExitRuntimeError
 		return
 	}
+	exitCode = finishExit(report, cfg.FailOn, flagAllowIncomplete)
+}
 
-	// Check fail-on threshold
-	if cfg.FailOn != "none" && cfg.FailOn != "" {
+// finishExit is the exit code for a report that was produced and written:
+// findings at or above failOn win, then an incomplete review, then success
+// (specs/SPEC-review-integrity.md FR-3).
+func finishExit(report *review.Report, failOn string, allowIncomplete bool) int {
+	if failOn != "none" && failOn != "" {
 		for _, f := range report.Findings {
-			if review.MeetsThreshold(f.Severity, cfg.FailOn) {
-				exitCode = ExitFindings
-				return
+			if review.MeetsThreshold(f.Severity, failOn) {
+				return ExitFindings
 			}
 		}
 	}
+	if report.Coverage.Incomplete() && !allowIncomplete {
+		return ExitIncomplete
+	}
+	return ExitSuccess
 }
 
 func runCompareMode(ctx context.Context, diff gitctx.DiffResult, cfg config.Config, models []string, builder review.PromptBuilder) (*review.Report, error) {
@@ -180,15 +197,17 @@ func runCompareMode(ctx context.Context, diff gitctx.DiffResult, cfg config.Conf
 		return nil, err
 	}
 
-	findings := cr.All
+	findings, discarded := review.VerifyFindings(ctx, cr.All, diff, cfg)
 	if cfg.MaxFindings > 0 && len(findings) > cfg.MaxFindings {
 		findings = findings[:cfg.MaxFindings]
 	}
 
 	report := review.BuildReport(diff, findings, cr.LLMMs, time.Since(startTime).Milliseconds())
+	report.Discarded = discarded
 	// Overwrite provenance to enumerate every compared model, even ones that
 	// produced zero findings — the list represents who reviewed, not who reported.
 	report.Provenance = compareProvenance(models)
+	report.Coverage = review.CompareCoverage(review.ReviewersFromSpecs(models), len(diff.Files), diff.ReviewedBytes(), diff.TruncatedBytes, cr.Calls)
 
 	// Print compare summary to stderr
 	fmt.Fprintf(os.Stderr, "Compare mode: %d models, %d consensus findings, %d total\n",
@@ -243,7 +262,12 @@ func runPerCommitReview(ctx context.Context, revRange string, cfg config.Config)
 	startTime := time.Now()
 
 	var allFindings []review.Finding
+	allDiscarded := []review.Discard{}
 	var totalLLMMs int64
+	// FR-1: coverage summed over reviewed commits; a commit that could not be
+	// reviewed is a skip, which makes the report incomplete.
+	cov := review.NewCoverage(review.ConfigReviewer(cfg.Provider, cfg.Model), 0, 0, 0)
+	reviewed := 0
 
 	for i, c := range commits {
 		shortSHA := c.SHA
@@ -258,6 +282,7 @@ func runPerCommitReview(ctx context.Context, revRange string, cfg config.Config)
 				return // context cancelled — stop immediately
 			}
 			fmt.Fprintf(os.Stderr, "  Skipping (error getting diff): %v\n", err)
+			cov.Skipped = append(cov.Skipped, review.Skip{Target: shortSHA, Reason: "error getting diff: " + err.Error()})
 			continue
 		}
 		if strings.TrimSpace(diff.Diff) == "" {
@@ -276,8 +301,11 @@ func runPerCommitReview(ctx context.Context, revRange string, cfg config.Config)
 				return // context cancelled — stop immediately
 			}
 			fmt.Fprintf(os.Stderr, "  Error reviewing commit %s: %v\n", shortSHA, err)
+			cov.Skipped = append(cov.Skipped, review.Skip{Target: shortSHA, Reason: "review failed: " + err.Error()})
 			continue
 		}
+		cov.Add(report.Coverage, reviewed == 0)
+		reviewed++
 
 		// Stamp commit SHA on each finding's locations
 		for j := range report.Findings {
@@ -287,6 +315,7 @@ func runPerCommitReview(ctx context.Context, revRange string, cfg config.Config)
 		}
 
 		allFindings = append(allFindings, report.Findings...)
+		allDiscarded = append(allDiscarded, review.StampCommit(report.Discarded, shortSHA)...)
 		totalLLMMs += report.Timing.LLMMs
 	}
 
@@ -308,22 +337,16 @@ func runPerCommitReview(ctx context.Context, revRange string, cfg config.Config)
 	}
 
 	report := review.BuildReport(synthDiff, allFindings, totalLLMMs, time.Since(startTime).Milliseconds())
+	cov.Finalize()
+	report.Coverage = cov
+	report.Discarded = allDiscarded
 
 	if err := output.WriteReport(report, cfg.Format, flagOut); err != nil {
 		fmt.Fprintf(os.Stderr, "Error writing output: %v\n", err)
 		exitCode = ExitRuntimeError
 		return
 	}
-
-	// Check fail-on threshold
-	if cfg.FailOn != "none" && cfg.FailOn != "" {
-		for _, f := range report.Findings {
-			if review.MeetsThreshold(f.Severity, cfg.FailOn) {
-				exitCode = ExitFindings
-				return
-			}
-		}
-	}
+	exitCode = finishExit(report, cfg.FailOn, flagAllowIncomplete)
 }
 
 var reviewCmd = &cobra.Command{
@@ -546,15 +569,7 @@ func runCodebaseReview(ctx context.Context, diff gitctx.DiffResult, cfg config.C
 		exitCode = ExitRuntimeError
 		return
 	}
-
-	if cfg.FailOn != "none" && cfg.FailOn != "" {
-		for _, f := range report.Findings {
-			if review.MeetsThreshold(f.Severity, cfg.FailOn) {
-				exitCode = ExitFindings
-				return
-			}
-		}
-	}
+	exitCode = finishExit(report, cfg.FailOn, flagAllowIncomplete)
 }
 
 func init() {

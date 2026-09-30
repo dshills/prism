@@ -37,6 +37,13 @@ type sarifLog struct {
 type sarifRun struct {
 	Tool    sarifTool     `json:"tool"`
 	Results []sarifResult `json:"results"`
+	// Properties carries prism's coverage record, so a SARIF consumer can
+	// tell a clean run from a partial one (FR-1).
+	Properties *sarifRunProperties `json:"properties,omitempty"`
+}
+
+type sarifRunProperties struct {
+	Coverage review.Coverage `json:"coverage"`
 }
 
 type sarifTool struct {
@@ -216,8 +223,9 @@ func buildSARIF(report *review.Report) sarifLog {
 		Schema:  "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/main/sarif-2.1/schema/sarif-schema-2.1.0.json",
 		Runs: []sarifRun{
 			{
-				Tool:    tool,
-				Results: results,
+				Tool:       tool,
+				Results:    results,
+				Properties: &sarifRunProperties{Coverage: report.Coverage},
 			},
 		},
 	}

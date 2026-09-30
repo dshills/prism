@@ -18,6 +18,7 @@ type CompareResult struct {
 	Unique    map[string][]Finding // Unique findings per model (key: "provider:model")
 	All       []Finding            // All merged findings for the report
 	LLMMs     int64
+	Calls     int // model calls made, one per model
 }
 
 // compareModelResult holds the output from a single model's review.
@@ -114,7 +115,9 @@ func RunCompareWithOptions(ctx context.Context, diff string, files []string, mod
 	}
 
 	// Merge findings
-	return mergeResults(results, totalLLMMs), nil
+	cr := mergeResults(results, totalLLMMs)
+	cr.Calls = len(models)
+	return cr, nil
 }
 
 func mergeResults(results []compareModelResult, totalLLMMs int64) *CompareResult {

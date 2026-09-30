@@ -29,6 +29,10 @@ type RepoInfo = review.RepoInfo
 type InputInfo = review.InputInfo
 type Summary = review.Summary
 type Timing = review.Timing
+type Coverage = review.Coverage
+type Reviewer = review.Reviewer
+type Skip = review.Skip
+type Discard = review.Discard
 
 type ReviewMode string
 
@@ -316,13 +320,15 @@ func runCompare(ctx context.Context, diff gitctx.DiffResult, cfg config.Config, 
 	if err != nil {
 		return nil, err
 	}
-	findings := cr.All
+	findings, discarded := review.VerifyFindings(ctx, cr.All, diff, cfg)
 	if cfg.MaxFindings > 0 && len(findings) > cfg.MaxFindings {
 		findings = findings[:cfg.MaxFindings]
 	}
 	_ = maxFindingsPerFile
 	report := review.BuildReport(diff, findings, cr.LLMMs, 0)
+	report.Discarded = discarded
 	report.Provenance = compareProvenance(models)
+	report.Coverage = review.CompareCoverage(review.ReviewersFromSpecs(models), len(diff.Files), diff.ReviewedBytes(), diff.TruncatedBytes, cr.Calls)
 	return report, nil
 }
 
@@ -335,6 +341,9 @@ func runPerCommit(ctx context.Context, opts ReviewOptions, cfg config.Config) (*
 		totalLLMMs  int64
 		meta        gitctx.RepoMeta
 		start       = time.Now()
+		cov         = review.NewCoverage(review.ConfigReviewer(cfg.Provider, cfg.Model), 0, 0, 0)
+		reviewed    int
+		discarded   = []review.Discard{}
 	)
 	err := withRepoPathNoResult(opts.RepoPath, func() error {
 		commits, err := gitctx.ListCommits(opts.Revision, opts.MergeBase)
@@ -348,24 +357,31 @@ func runPerCommit(ctx context.Context, opts ReviewOptions, cfg config.Config) (*
 			Exclude:      cfg.Exclude,
 		}
 		for _, commit := range commits {
+			shortSHA := commit.SHA
+			if len(shortSHA) > 7 {
+				shortSHA = shortSHA[:7]
+			}
 			diff, err := gitctx.Commit(ctx, commit.SHA, "", diffOpts)
-			if err != nil || strings.TrimSpace(diff.Diff) == "" {
+			if err != nil {
+				cov.Skipped = append(cov.Skipped, review.Skip{Target: shortSHA, Reason: "error getting diff: " + err.Error()})
+				continue
+			}
+			if strings.TrimSpace(diff.Diff) == "" {
 				continue
 			}
 			report, err := review.Run(ctx, diff, cfg)
 			if err != nil {
 				return err
 			}
-			shortSHA := commit.SHA
-			if len(shortSHA) > 7 {
-				shortSHA = shortSHA[:7]
-			}
+			cov.Add(report.Coverage, reviewed == 0)
+			reviewed++
 			for i := range report.Findings {
 				for j := range report.Findings[i].Locations {
 					report.Findings[i].Locations[j].Commit = shortSHA
 				}
 			}
 			allFindings = append(allFindings, report.Findings...)
+			discarded = append(discarded, review.StampCommit(report.Discarded, shortSHA)...)
 			totalLLMMs += report.Timing.LLMMs
 		}
 		meta, _ = gitctx.GetRepoMeta(ctx)
@@ -379,7 +395,11 @@ func runPerCommit(ctx context.Context, opts ReviewOptions, cfg config.Config) (*
 	if cfg.MaxFindings > 0 && len(allFindings) > cfg.MaxFindings {
 		allFindings = allFindings[:cfg.MaxFindings]
 	}
-	return review.BuildReport(gitctx.DiffResult{Mode: "range", Range: opts.Revision, Repo: meta}, allFindings, totalLLMMs, time.Since(start).Milliseconds()), nil
+	report := review.BuildReport(gitctx.DiffResult{Mode: "range", Range: opts.Revision, Repo: meta}, allFindings, totalLLMMs, time.Since(start).Milliseconds())
+	cov.Finalize()
+	report.Coverage = cov
+	report.Discarded = discarded
+	return report, nil
 }
 
 func withRepoPath(repoPath string, fn func() (gitctx.DiffResult, error)) (gitctx.DiffResult, error) {

@@ -31,6 +31,21 @@ type DiffResult struct {
 	Mode  string
 	Range string
 	Repo  RepoMeta
+	// TruncatedBytes is how many bytes of the diff were cut at MaxDiffBytes
+	// and so were never reviewed (0 when the diff fit).
+	TruncatedBytes int
+}
+
+// TruncationMarker is appended to a diff cut at MaxDiffBytes.
+const TruncationMarker = "\n... (diff truncated at max-diff-bytes limit)\n"
+
+// ReviewedBytes is the size of the diff text actually under review, without
+// the truncation marker.
+func (d DiffResult) ReviewedBytes() int {
+	if d.TruncatedBytes > 0 && strings.HasSuffix(d.Diff, TruncationMarker) {
+		return len(d.Diff) - len(TruncationMarker)
+	}
+	return len(d.Diff)
 }
 
 // RepoMeta contains git repository metadata.
@@ -238,16 +253,19 @@ func buildResult(ctx context.Context, diff, mode, rangeStr string, opts DiffOpti
 		files = filterFileList(files, opts.Exclude)
 	}
 
+	truncated := 0
 	if opts.MaxDiffBytes > 0 && len(diff) > opts.MaxDiffBytes {
-		diff = diff[:opts.MaxDiffBytes] + "\n... (diff truncated at max-diff-bytes limit)\n"
+		truncated = len(diff) - opts.MaxDiffBytes
+		diff = diff[:opts.MaxDiffBytes] + TruncationMarker
 	}
 
 	return DiffResult{
-		Diff:  diff,
-		Files: files,
-		Mode:  mode,
-		Range: rangeStr,
-		Repo:  meta,
+		Diff:           diff,
+		Files:          files,
+		Mode:           mode,
+		Range:          rangeStr,
+		Repo:           meta,
+		TruncatedBytes: truncated,
 	}, nil
 }
 

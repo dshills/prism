@@ -72,6 +72,9 @@ type Finding struct {
 	Locations  []Location `json:"locations"`
 	Tags       []string   `json:"tags,omitempty"`
 	References []string   `json:"references,omitempty"`
+	// Evidence is the code the model quoted as showing the problem. It is
+	// checked against the reviewed input (specs/SPEC-review-integrity.md FR-5).
+	Evidence string `json:"evidence,omitempty"`
 	// Provider is the LLM vendor that produced this finding
 	// (e.g. "anthropic", "openai"). Empty only for legacy/test data.
 	Provider string `json:"provider,omitempty"`
@@ -137,6 +140,19 @@ type Report struct {
 	// to this report. A single-provider run has one entry; compare mode lists
 	// each model. The underscore prefix marks it as tool-level metadata.
 	Provenance []Provenance `json:"_provenance,omitempty"`
+	// Coverage states what was reviewed, how, and by which model. It is
+	// always present, including when there are no findings, so a clean
+	// result can be told apart from a partial review or no review at all.
+	Coverage Coverage `json:"coverage"`
+	// Discarded lists findings that failed verification against the code,
+	// each with the reason. They are not in Findings or Summary (FR-7).
+	Discarded []Discard `json:"discarded"`
+}
+
+// Discard is a finding removed by verification, and why.
+type Discard struct {
+	Finding Finding `json:"finding"`
+	Reason  string  `json:"reason"`
 }
 
 // ComputeSummary calculates the summary from findings.

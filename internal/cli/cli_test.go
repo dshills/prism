@@ -16,6 +16,8 @@ func resetFlags() {
 	flagContextLines = 0
 	flagMaxDiffBytes = 0
 	flagChunkBytes = 0
+	flagAllowIncomplete = false
+	flagNoVerifyFindings = false
 	flagProvider = ""
 	flagModel = ""
 	flagCompare = ""
@@ -551,6 +553,7 @@ func TestExitCodes(t *testing.T) {
 		{"ExitUsageError", ExitUsageError, 2},
 		{"ExitAuthError", ExitAuthError, 3},
 		{"ExitRuntimeError", ExitRuntimeError, 4},
+		{"ExitIncomplete", ExitIncomplete, 5},
 	}
 
 	for _, tt := range tests {

@@ -12,17 +12,21 @@ import (
 
 // Config represents the prism configuration.
 type Config struct {
-	Provider       string        `json:"provider"`
-	Model          string        `json:"model"`
-	Compare        []string      `json:"compare,omitempty"`
-	Format         string        `json:"format"`
-	FailOn         string        `json:"failOn"`
-	MaxFindings    int           `json:"maxFindings"`
-	ContextLines   int           `json:"contextLines"`
-	Include        []string      `json:"include"`
-	Exclude        []string      `json:"exclude"`
-	MaxDiffBytes   int           `json:"maxDiffBytes"`
-	ChunkBytes     int           `json:"chunkBytes,omitempty"`
+	Provider     string   `json:"provider"`
+	Model        string   `json:"model"`
+	Compare      []string `json:"compare,omitempty"`
+	Format       string   `json:"format"`
+	FailOn       string   `json:"failOn"`
+	MaxFindings  int      `json:"maxFindings"`
+	ContextLines int      `json:"contextLines"`
+	Include      []string `json:"include"`
+	Exclude      []string `json:"exclude"`
+	MaxDiffBytes int      `json:"maxDiffBytes"`
+	ChunkBytes   int      `json:"chunkBytes,omitempty"`
+	// VerifyFindings checks findings against the code before reporting them
+	// (evidence and Go compile claims). nil means the default, true; a pointer
+	// so an explicit false in a config file is distinguishable from unset.
+	VerifyFindings *bool         `json:"verifyFindings,omitempty"`
 	MaxConcurrency int           `json:"maxConcurrency,omitempty"`
 	RateLimitRPM   int           `json:"rateLimitRpm,omitempty"`
 	RulesFile      string        `json:"rulesFile,omitempty"`
@@ -186,6 +190,10 @@ func mergeFile(dst *Config, src Config) {
 	if src.ChunkBytes > 0 {
 		dst.ChunkBytes = src.ChunkBytes
 	}
+	if src.VerifyFindings != nil {
+		v := *src.VerifyFindings
+		dst.VerifyFindings = &v
+	}
 	if src.MaxConcurrency > 0 {
 		dst.MaxConcurrency = src.MaxConcurrency
 	}
@@ -242,6 +250,13 @@ func mergeEnv(cfg *Config) error {
 		}
 		cfg.ContextLines = n
 	}
+	if v := os.Getenv("PRISM_VERIFY_FINDINGS"); v != "" {
+		b, err := strconv.ParseBool(v)
+		if err != nil {
+			return fmt.Errorf("PRISM_VERIFY_FINDINGS must be true or false, got %q", v)
+		}
+		cfg.VerifyFindings = &b
+	}
 	if v := os.Getenv("PRISM_CHUNK_BYTES"); v != "" {
 		n, err := strconv.Atoi(v)
 		if err != nil {
@@ -297,6 +312,11 @@ func mergeOverrides(cfg *Config, overrides map[string]string) {
 			cfg.MaxDiffBytes = n
 		}
 	}
+	if v, ok := overrides["verifyFindings"]; ok && v != "" {
+		if b, err := strconv.ParseBool(v); err == nil {
+			cfg.VerifyFindings = &b
+		}
+	}
 	if v, ok := overrides["chunkBytes"]; ok && v != "" {
 		if n, err := strconv.Atoi(v); err == nil {
 			cfg.ChunkBytes = n
@@ -339,6 +359,12 @@ func SetField(cfg *Config, key, value string) error {
 			return fmt.Errorf("maxDiffBytes must be an integer: %w", err)
 		}
 		cfg.MaxDiffBytes = n
+	case "verifyFindings":
+		b, err := strconv.ParseBool(value)
+		if err != nil {
+			return fmt.Errorf("verifyFindings must be true or false: %w", err)
+		}
+		cfg.VerifyFindings = &b
 	case "chunkBytes":
 		n, err := strconv.Atoi(value)
 		if err != nil {
@@ -351,4 +377,10 @@ func SetField(cfg *Config, key, value string) error {
 		return fmt.Errorf("unknown config key: %s", key)
 	}
 	return nil
+}
+
+// ShouldVerifyFindings reports whether findings are verified against the code
+// before being reported; true unless explicitly turned off.
+func (c Config) ShouldVerifyFindings() bool {
+	return c.VerifyFindings == nil || *c.VerifyFindings
 }

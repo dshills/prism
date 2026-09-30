@@ -539,3 +539,38 @@ func TestChunkBytes(t *testing.T) {
 		t.Errorf("config file: ChunkBytes = %d, want 16000", dst.ChunkBytes)
 	}
 }
+
+// verifyFindings: on by default; off via env, override, config key or file.
+func TestVerifyFindings(t *testing.T) {
+	if !Default().ShouldVerifyFindings() {
+		t.Error("verification should be on by default")
+	}
+	t.Setenv("PRISM_VERIFY_FINDINGS", "false")
+	cfg := Default()
+	if err := mergeEnv(&cfg); err != nil || cfg.ShouldVerifyFindings() {
+		t.Errorf("PRISM_VERIFY_FINDINGS=false: err %v, verify %v", err, cfg.ShouldVerifyFindings())
+	}
+	t.Setenv("PRISM_VERIFY_FINDINGS", "maybe")
+	if err := mergeEnv(&cfg); err == nil {
+		t.Error("PRISM_VERIFY_FINDINGS=maybe should be an error")
+	}
+	cfg = Default()
+	mergeOverrides(&cfg, map[string]string{"verifyFindings": "false"})
+	if cfg.ShouldVerifyFindings() {
+		t.Error("override verifyFindings=false ignored")
+	}
+	if err := SetField(&cfg, "verifyFindings", "true"); err != nil || !cfg.ShouldVerifyFindings() {
+		t.Errorf("SetField: %v", err)
+	}
+	off := false
+	dst := Default()
+	mergeFile(&dst, Config{VerifyFindings: &off})
+	if dst.ShouldVerifyFindings() {
+		t.Error("config file verifyFindings=false ignored")
+	}
+	dst2 := Default()
+	mergeFile(&dst2, Config{})
+	if !dst2.ShouldVerifyFindings() {
+		t.Error("an unset file value must not turn verification off")
+	}
+}

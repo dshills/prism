@@ -32,6 +32,7 @@ type rawFinding struct {
 	StartLine  int      `json:"startLine"`
 	EndLine    int      `json:"endLine"`
 	Tags       []string `json:"tags"`
+	Evidence   string   `json:"evidence,omitempty"`
 	Provider   string   `json:"provider,omitempty"`
 	Model      string   `json:"model,omitempty"`
 }
@@ -66,8 +67,20 @@ func reviewPipeline(ctx context.Context, diff gitctx.DiffResult, cfg config.Conf
 		redactedDiff = redact.Secrets(redactedDiff)
 	}
 
+	// FR-1: coverage is recorded for every outcome, including an empty diff.
+	cov := NewCoverage(ConfigReviewer(cfg.Provider, cfg.Model), len(diff.Files), diff.ReviewedBytes(), diff.TruncatedBytes)
+
 	if strings.TrimSpace(redactedDiff) == "" {
-		return emptyReport(diff, startTime), nil
+		return emptyReport(diff, startTime, cov), nil
+	}
+
+	// Decide the chunking up front so a cache hit can report it too.
+	var chunks []Chunk
+	if opts.alwaysChunk || NeedsChunking(redactedDiff, cfg.ChunkBytes) {
+		chunks = SplitIntoChunks(redactedDiff, cfg.ChunkBytes)
+		cov.Chunks = len(chunks)
+	} else {
+		cov.Chunks = 1
 	}
 
 	// Initialize cache
@@ -91,6 +104,7 @@ func reviewPipeline(ctx context.Context, diff gitctx.DiffResult, cfg config.Conf
 			// Legacy cache entries may lack provenance; stamp from the cache
 			// key's (provider, model) since the key itself fixes them.
 			findings = stampProvenance(findings, cfg.Provider, cfg.Model)
+			cov.CacheHit = true
 		}
 	}
 
@@ -107,9 +121,8 @@ func reviewPipeline(ctx context.Context, diff gitctx.DiffResult, cfg config.Conf
 		}
 
 		// Use chunked review for large diffs or when always requested (codebase mode)
-		if opts.alwaysChunk || NeedsChunking(redactedDiff, cfg.ChunkBytes) {
-			chunks := SplitIntoChunks(redactedDiff, cfg.ChunkBytes)
-			findings, llmMs, err = RunChunkedWithOptions(ctx, chunks, provider, cfg, rules, ChunkOptions{
+		if chunks != nil {
+			findings, llmMs, cov.LLMCalls, err = runChunkedCounted(ctx, chunks, provider, cfg, rules, ChunkOptions{
 				Builder: opts.builder,
 			})
 			if err != nil {
@@ -130,6 +143,7 @@ func reviewPipeline(ctx context.Context, diff gitctx.DiffResult, cfg config.Conf
 			}
 
 			resp, err := provider.Review(ctx, req)
+			cov.LLMCalls++
 			if err != nil {
 				return nil, fmt.Errorf("provider review: %w", err)
 			}
@@ -148,6 +162,7 @@ func reviewPipeline(ctx context.Context, diff gitctx.DiffResult, cfg config.Conf
 					MaxTokens:    8192,
 				}
 				resp2, err2 := provider.Review(ctx, repairReq)
+				cov.LLMCalls++
 				if err2 != nil {
 					return nil, fmt.Errorf("repair pass failed: %w (original error: %w)", err2, err)
 				}
@@ -170,12 +185,21 @@ func reviewPipeline(ctx context.Context, diff gitctx.DiffResult, cfg config.Conf
 	// Apply rules severity overrides
 	findings = ApplySeverityOverrides(findings, rules)
 
+	// FR-5/FR-6: verify after the cache, which holds unverified findings so a
+	// changed tree re-verifies (FR-8), and before the limit, so discarded
+	// findings do not use it up.
+	findings, discarded := VerifyFindings(ctx, findings, diff, cfg)
+
 	// Limit findings
 	if cfg.MaxFindings > 0 && len(findings) > cfg.MaxFindings {
 		findings = findings[:cfg.MaxFindings]
 	}
 
-	return BuildReport(diff, findings, llmMs, time.Since(startTime).Milliseconds()), nil
+	report := BuildReport(diff, findings, llmMs, time.Since(startTime).Milliseconds())
+	cov.Finalize()
+	report.Coverage = cov
+	report.Discarded = discarded
+	return report, nil
 }
 
 func parseFindings(content string) ([]Finding, error) {
@@ -215,6 +239,7 @@ func parseFindings(content string) ([]Finding, error) {
 			Suggestion: r.Suggestion,
 			Confidence: r.Confidence,
 			Tags:       r.Tags,
+			Evidence:   r.Evidence,
 			Provider:   r.Provider,
 			Model:      r.Model,
 			Locations: []Location{
@@ -261,6 +286,7 @@ func findingsToRaw(findings []Finding) []rawFinding {
 			Suggestion: f.Suggestion,
 			Confidence: f.Confidence,
 			Tags:       f.Tags,
+			Evidence:   f.Evidence,
 			Provider:   f.Provider,
 			Model:      f.Model,
 		}
@@ -344,9 +370,11 @@ func runCodebaseWithFileCache(
 		redactedDiff = redact.Secrets(diff.Diff)
 	}
 
+	cov := NewCoverage(ConfigReviewer(cfg.Provider, cfg.Model), len(diff.Files), diff.ReviewedBytes(), diff.TruncatedBytes)
+
 	// Step 2: Nothing to review.
 	if strings.TrimSpace(redactedDiff) == "" {
-		return emptyReport(diff, startTime), nil
+		return emptyReport(diff, startTime, cov), nil
 	}
 
 	// Step 3: Split into per-file sections.
@@ -384,8 +412,9 @@ func runCodebaseWithFileCache(
 		}
 
 		chunks := SplitIntoChunks(filteredDiff, cfg.ChunkBytes)
+		cov.Chunks = len(chunks)
 		var err2 error
-		freshFindings, llmMs, err2 = RunChunkedWithOptions(ctx, chunks, provider, cfg.Config, rules, ChunkOptions{Builder: codebaseBuilder})
+		freshFindings, llmMs, cov.LLMCalls, err2 = runChunkedCounted(ctx, chunks, provider, cfg.Config, rules, ChunkOptions{Builder: codebaseBuilder})
 		if err2 != nil {
 			return nil, fmt.Errorf("chunked review: %w", err2)
 		}
@@ -403,6 +432,9 @@ func runCodebaseWithFileCache(
 	// Step 11: Deduplicate (safety net for any cross-chunk duplicates).
 	allFindings = DeduplicateFindings(allFindings)
 
+	// Verify against the code (FR-5/FR-6); cached findings re-verify too.
+	allFindings, discarded := VerifyFindings(ctx, allFindings, diff, cfg.Config)
+
 	// Step 12: Sort high → medium → low, then by path, then by line.
 	SortFindings(allFindings)
 
@@ -411,7 +443,16 @@ func runCodebaseWithFileCache(
 		allFindings = allFindings[:cfg.MaxFindings]
 	}
 
-	return BuildReport(diff, allFindings, llmMs, time.Since(startTime).Milliseconds()), nil
+	// Every file came from the per-file cache: nothing was sent to a model.
+	if len(uncachedSections) == 0 {
+		cov.CacheHit = true
+		cov.Chunks = len(SplitIntoChunks(redactedDiff, cfg.ChunkBytes))
+	}
+	report := BuildReport(diff, allFindings, llmMs, time.Since(startTime).Milliseconds())
+	cov.Finalize()
+	report.Coverage = cov
+	report.Discarded = discarded
+	return report, nil
 }
 
 // storeFindingsPerFile stores fresh LLM findings into the cache at per-file
@@ -485,6 +526,7 @@ func BuildReport(diff gitctx.DiffResult, findings []Finding, llmMs, totalMs int6
 			TotalMs: totalMs,
 		},
 		Provenance: CollectProvenance(findings),
+		Discarded:  []Discard{},
 	}
 }
 
@@ -511,6 +553,13 @@ func CollectProvenance(findings []Finding) []Provenance {
 	return out
 }
 
-func emptyReport(diff gitctx.DiffResult, startTime time.Time) *Report {
-	return BuildReport(diff, []Finding{}, 0, time.Since(startTime).Milliseconds())
+// emptyReport is the report for a diff with nothing to review. Nothing was
+// sent to a model and nothing was missed, so it is complete with no chunks
+// (unless the git layer truncated it, which Finalize still reports).
+func emptyReport(diff gitctx.DiffResult, startTime time.Time, cov Coverage) *Report {
+	r := BuildReport(diff, []Finding{}, 0, time.Since(startTime).Milliseconds())
+	cov.Chunks = 0
+	cov.Finalize()
+	r.Coverage = cov
+	return r
 }

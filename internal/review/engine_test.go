@@ -415,7 +415,11 @@ func TestEmptyReport(t *testing.T) {
 			Branch: "main",
 		},
 	}
-	r := emptyReport(diff, time.Now())
+	r := emptyReport(diff, time.Now(), NewCoverage(ConfigReviewer("anthropic", "m"), 0, 0, 0))
+	// FR-1: an empty diff is complete, with nothing sent to a model.
+	if !r.Coverage.Complete || r.Coverage.Chunks != 0 || r.Coverage.LLMCalls != 0 {
+		t.Errorf("empty report coverage = %+v, want complete with 0 chunks and 0 calls", r.Coverage)
+	}
 
 	if r.Tool != "prism" {
 		t.Errorf("Tool = %q, want %q", r.Tool, "prism")
