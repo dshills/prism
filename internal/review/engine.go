@@ -37,6 +37,10 @@ type rawFinding struct {
 	Model      string   `json:"model,omitempty"`
 }
 
+// newProvider creates the provider a review sends its prompts to. Tests
+// replace it to review without a real provider.
+var newProvider = providers.New
+
 // reviewOpts controls differences between Run() and RunCodebase() pipelines.
 type reviewOpts struct {
 	builder     PromptBuilder // nil = default diff prompts
@@ -76,6 +80,15 @@ func reviewCacheKey(provider, model, prompt, content string) string {
 func diffCacheKey(cfg config.Config, prompt, diff string) string {
 	return reviewCacheKey(cfg.Provider, cfg.Model, prompt,
 		fmt.Sprintf("chunkBytes=%d\n%s", effectiveChunkBytes(cfg.ChunkBytes), diff))
+}
+
+// chunkCacheKey keys one chunk's cached findings in a chunked diff review.
+// It is the chunk's own text, not the whole diff, so an edit misses only the
+// chunks it touches. The note listing the other parts' files is left out:
+// otherwise adding or removing any file would miss every chunk, and the
+// prompt tells the model not to report on code it can only see named there.
+func chunkCacheKey(cfg config.Config, prompt, chunkDiff string) string {
+	return reviewCacheKey(cfg.Provider, cfg.Model, prompt, "chunk\n"+chunkDiff)
 }
 
 // fileCacheKey keys one file's cached findings in a codebase review.
@@ -127,86 +140,19 @@ func reviewPipeline(ctx context.Context, diff gitctx.DiffResult, cfg config.Conf
 		builder = defaultPromptBuilder
 	}
 
-	cacheKey := diffCacheKey(cfg, promptFingerprint(builder, cfg, rules), redactedDiff)
+	prompt := promptFingerprint(builder, cfg, rules)
 
-	// Check cache
 	var findings []Finding
 	var llmMs int64
-	if cached, ok := reviewCache.Get(cacheKey); ok {
-		findings, err = parseFindings(cached)
-		if err != nil {
-			// Cache entry is corrupt, fall through to LLM
-			findings = nil
-		} else {
-			// Legacy cache entries may lack provenance; stamp from the cache
-			// key's (provider, model) since the key itself fixes them.
-			findings = stampProvenance(findings, cfg.Provider, cfg.Model)
-			cov.CacheHit = true
-		}
+	if chunks != nil {
+		// Chunked: one cache entry per chunk, so a re-review after an edit
+		// sends only the chunks that changed.
+		findings, llmMs, err = reviewChunksCached(ctx, chunks, cfg, rules, builder, prompt, reviewCache, &cov)
+	} else {
+		findings, llmMs, err = reviewWholeCached(ctx, redactedDiff, diff.Files, cfg, rules, builder, prompt, reviewCache, &cov)
 	}
-
-	if findings == nil {
-		provider, err := providers.New(cfg.Provider, cfg.Model)
-		if err != nil {
-			return nil, fmt.Errorf("creating provider: %w", err)
-		}
-
-		// Use chunked review for large diffs or when always requested (codebase mode)
-		if chunks != nil {
-			findings, llmMs, cov.LLMCalls, err = runChunkedCounted(ctx, chunks, provider, cfg, rules, ChunkOptions{
-				Builder: builder,
-			})
-			if err != nil {
-				return nil, fmt.Errorf("chunked review: %w", err)
-			}
-		} else {
-			sysPr, userPr := builder(redactedDiff, diff.Files, cfg, rules)
-
-			llmStart := time.Now()
-			req := providers.ReviewRequest{
-				SystemPrompt: sysPr,
-				UserPrompt:   userPr,
-				MaxTokens:    8192,
-			}
-
-			resp, err := provider.Review(ctx, req)
-			cov.LLMCalls++
-			if err != nil {
-				return nil, fmt.Errorf("provider review: %w", err)
-			}
-			llmMs = time.Since(llmStart).Milliseconds()
-
-			findings, err = parseFindings(resp.Content)
-			if err != nil {
-				// Attempt one repair pass
-				repairPrompt := fmt.Sprintf(
-					"Your previous response was not valid JSON. The error was: %s\n\nPlease fix it and respond with ONLY a valid JSON array of findings.\n\nYour previous response was:\n%s",
-					err.Error(), resp.Content,
-				)
-				repairReq := providers.ReviewRequest{
-					SystemPrompt: sysPr,
-					UserPrompt:   repairPrompt,
-					MaxTokens:    8192,
-				}
-				resp2, err2 := provider.Review(ctx, repairReq)
-				cov.LLMCalls++
-				if err2 != nil {
-					return nil, fmt.Errorf("repair pass failed: %w (original error: %w)", err2, err)
-				}
-				findings, err = parseFindings(resp2.Content)
-				if err != nil {
-					return nil, fmt.Errorf("response validation failed after repair: %w", err)
-				}
-				resp = resp2
-			}
-			findings = stampProvenance(findings, resp.Provider, resp.Model)
-			SortFindings(findings)
-		}
-
-		// Store in cache as rawFinding format so parseFindings can read it back
-		if rawJSON, jerr := json.Marshal(findingsToRaw(findings)); jerr == nil {
-			_ = reviewCache.Put(cacheKey, string(rawJSON))
-		}
+	if err != nil {
+		return nil, err
 	}
 
 	// Apply rules severity overrides
@@ -227,6 +173,123 @@ func reviewPipeline(ctx context.Context, diff gitctx.DiffResult, cfg config.Conf
 	report.Coverage = cov
 	report.Discarded = discarded
 	return report, nil
+}
+
+// reviewWholeCached reviews a diff that fits in one prompt, with one cache
+// entry for the whole diff.
+func reviewWholeCached(ctx context.Context, redactedDiff string, files []string, cfg config.Config, rules *Rules, builder PromptBuilder, prompt string, rc *cache.Cache, cov *Coverage) ([]Finding, int64, error) {
+	cacheKey := diffCacheKey(cfg, prompt, redactedDiff)
+	if cached, ok := rc.Get(cacheKey); ok {
+		// A corrupt entry falls through to the LLM.
+		if findings, err := parseFindings(cached); err == nil {
+			// Legacy cache entries may lack provenance; stamp from the cache
+			// key's (provider, model) since the key itself fixes them.
+			cov.CacheHit = true
+			cov.CachedChunks = 1
+			return stampProvenance(findings, cfg.Provider, cfg.Model), 0, nil
+		}
+	}
+
+	provider, err := newProvider(cfg.Provider, cfg.Model)
+	if err != nil {
+		return nil, 0, fmt.Errorf("creating provider: %w", err)
+	}
+	sysPr, userPr := builder(redactedDiff, files, cfg, rules)
+
+	llmStart := time.Now()
+	req := providers.ReviewRequest{
+		SystemPrompt: sysPr,
+		UserPrompt:   userPr,
+		MaxTokens:    8192,
+	}
+
+	resp, err := provider.Review(ctx, req)
+	cov.LLMCalls++
+	if err != nil {
+		return nil, 0, fmt.Errorf("provider review: %w", err)
+	}
+	llmMs := time.Since(llmStart).Milliseconds()
+
+	findings, err := parseFindings(resp.Content)
+	if err != nil {
+		// Attempt one repair pass
+		repairPrompt := fmt.Sprintf(
+			"Your previous response was not valid JSON. The error was: %s\n\nPlease fix it and respond with ONLY a valid JSON array of findings.\n\nYour previous response was:\n%s",
+			err.Error(), resp.Content,
+		)
+		repairReq := providers.ReviewRequest{
+			SystemPrompt: sysPr,
+			UserPrompt:   repairPrompt,
+			MaxTokens:    8192,
+		}
+		resp2, err2 := provider.Review(ctx, repairReq)
+		cov.LLMCalls++
+		if err2 != nil {
+			return nil, llmMs, fmt.Errorf("repair pass failed: %w (original error: %w)", err2, err)
+		}
+		findings, err = parseFindings(resp2.Content)
+		if err != nil {
+			return nil, llmMs, fmt.Errorf("response validation failed after repair: %w", err)
+		}
+		resp = resp2
+	}
+	findings = stampProvenance(findings, resp.Provider, resp.Model)
+	SortFindings(findings)
+
+	putFindings(rc, cacheKey, findings)
+	return findings, llmMs, nil
+}
+
+// reviewChunksCached reviews a chunked diff with one cache entry per chunk. A
+// chunk whose entry hits is replayed rather than sent; the rest are reviewed
+// together, their prompts still listing every other part's files. Each chunk
+// reviewed is stored even when another one failed, so a rerun sends only the
+// chunks that did not succeed.
+func reviewChunksCached(ctx context.Context, chunks []Chunk, cfg config.Config, rules *Rules, builder PromptBuilder, prompt string, rc *cache.Cache, cov *Coverage) ([]Finding, int64, error) {
+	keys := make([]string, len(chunks))
+	perChunk := make([][]Finding, len(chunks))
+	var todo []int
+	for i, c := range chunks {
+		keys[i] = chunkCacheKey(cfg, prompt, c.Diff)
+		if cached, ok := rc.Get(keys[i]); ok {
+			// A corrupt entry is a miss.
+			if fs, err := parseFindings(cached); err == nil {
+				perChunk[i] = stampProvenance(fs, cfg.Provider, cfg.Model)
+				continue
+			}
+		}
+		todo = append(todo, i)
+	}
+	cov.CachedChunks = len(chunks) - len(todo)
+	if len(todo) == 0 {
+		cov.CacheHit = true
+		return mergeChunkFindings(perChunk), 0, nil
+	}
+
+	provider, err := newProvider(cfg.Provider, cfg.Model)
+	if err != nil {
+		return nil, 0, fmt.Errorf("creating provider: %w", err)
+	}
+	fresh, llmMs, calls, err := reviewChunks(ctx, chunks, todo, provider, cfg, rules, builder)
+	cov.LLMCalls = calls
+	for _, i := range todo {
+		if fresh[i] != nil { // nil: this chunk failed
+			putFindings(rc, keys[i], fresh[i])
+			perChunk[i] = fresh[i]
+		}
+	}
+	if err != nil {
+		return nil, llmMs, fmt.Errorf("chunked review: %w", err)
+	}
+	return mergeChunkFindings(perChunk), llmMs, nil
+}
+
+// putFindings stores findings under key in the rawFinding form parseFindings
+// reads back. Cache write errors are ignored: the cache is an optimisation.
+func putFindings(rc *cache.Cache, key string, findings []Finding) {
+	if rawJSON, err := json.Marshal(findingsToRaw(findings)); err == nil {
+		_ = rc.Put(key, string(rawJSON))
+	}
 }
 
 func parseFindings(content string) ([]Finding, error) {
@@ -434,7 +497,7 @@ func runCodebaseWithFileCache(
 		filteredDiff := strings.Join(uncachedSections, "")
 
 		// Step 7: Run the chunked review on uncached sections only.
-		provider, err := providers.New(cfg.Provider, cfg.Model)
+		provider, err := newProvider(cfg.Provider, cfg.Model)
 		if err != nil {
 			return nil, fmt.Errorf("creating provider: %w", err)
 		}
@@ -475,6 +538,7 @@ func runCodebaseWithFileCache(
 	if len(uncachedSections) == 0 {
 		cov.CacheHit = true
 		cov.Chunks = len(SplitIntoChunks(redactedDiff, cfg.ChunkBytes))
+		cov.CachedChunks = cov.Chunks
 	}
 	report := BuildReport(diff, allFindings, llmMs, time.Since(startTime).Milliseconds())
 	cov.Finalize()

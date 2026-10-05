@@ -21,15 +21,18 @@ type Skip struct {
 // Coverage describes what a review actually covered
 // (specs/SPEC-review-integrity.md FR-1).
 type Coverage struct {
-	Reviewer       []Reviewer `json:"reviewer"`
-	Files          int        `json:"files"`
-	Bytes          int        `json:"bytes"`
-	Chunks         int        `json:"chunks"`
-	LLMCalls       int        `json:"llmCalls"`
-	CacheHit       bool       `json:"cacheHit"`
-	TruncatedBytes int        `json:"truncatedBytes"`
-	Skipped        []Skip     `json:"skipped"`
-	Complete       bool       `json:"complete"`
+	Reviewer []Reviewer `json:"reviewer"`
+	Files    int        `json:"files"`
+	Bytes    int        `json:"bytes"`
+	Chunks   int        `json:"chunks"`
+	LLMCalls int        `json:"llmCalls"`
+	CacheHit bool       `json:"cacheHit"`
+	// CachedChunks is how many of Chunks were replayed from cache instead of
+	// sent to a model. It equals Chunks on a full cache hit.
+	CachedChunks   int    `json:"cachedChunks"`
+	TruncatedBytes int    `json:"truncatedBytes"`
+	Skipped        []Skip `json:"skipped"`
+	Complete       bool   `json:"complete"`
 }
 
 // NewCoverage starts a coverage record for one review of diffText by the given
@@ -81,6 +84,7 @@ func (c *Coverage) Add(o Coverage, first bool) {
 	c.Bytes += o.Bytes
 	c.Chunks += o.Chunks
 	c.LLMCalls += o.LLMCalls
+	c.CachedChunks += o.CachedChunks
 	c.TruncatedBytes += o.TruncatedBytes
 	c.Skipped = append(c.Skipped, o.Skipped...)
 	if first {
@@ -114,8 +118,12 @@ func (c Coverage) Describe(llmMs int64) string {
 	case c.CacheHit:
 		return fmt.Sprintf("Replayed from cache: %s, originally reviewed by %s", size, reviewerLabel(c.Reviewer))
 	default:
+		chunks := plural(c.Chunks, "chunk")
+		if c.CachedChunks > 0 {
+			chunks += fmt.Sprintf(" (%d from cache)", c.CachedChunks)
+		}
 		return fmt.Sprintf("Reviewed %s in %s by %s — %s, %.1fs",
-			size, plural(c.Chunks, "chunk"), reviewerLabel(c.Reviewer),
+			size, chunks, reviewerLabel(c.Reviewer),
 			plural(c.LLMCalls, "LLM call"), float64(llmMs)/1000)
 	}
 }

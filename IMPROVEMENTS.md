@@ -12,8 +12,8 @@ Prism is run by AI coding agents (Claude Code, Codex), not by people at a termin
 | # | Item | Improves | Priority | Status |
 |---|------|----------|----------|--------|
 | 1 | Cache keys that cover every prompt input | Accuracy | High | **Done** |
-| 2 | Per-chunk caching for diff modes | Speed, Tokens | High | Not started |
-| 3 | Keep partial results when a chunk fails | Speed, Tokens | High | Not started |
+| 2 | Per-chunk caching for diff modes | Speed, Tokens | High | **Done** |
+| 3 | Keep partial results when a chunk fails | Speed, Tokens | High | Partial — succeeded chunks are cached |
 | 4 | Stable finding fingerprints | Accuracy, Workflow | High | Not started |
 | 5 | Finding baseline / suppression | Workflow | High | Not started |
 | 6 | Native structured output | Accuracy, Tokens | High | Not started |
@@ -55,7 +55,13 @@ Prism is run by AI coding agents (Claude Code, Codex), not by people at a termin
 
 ---
 
-### 2. Per-chunk caching for diff modes
+### 2. Per-chunk caching for diff modes (DONE)
+
+**Status:** Done, per chunk rather than per file. A chunked diff caches each chunk under `chunkCacheKey` (the chunk's own text plus the prompt fingerprint from #1), sends only the misses, and merges the results in chunk order. Prompts for the chunks that are sent still list every other part's files. Coverage reports the replayed chunks in `cachedChunks`, and the text line reads `in 5 chunks (4 from cache)`.
+
+Per-file caching was rejected for diff modes because it replays stale findings. Say a finding on `a.go` comes from how it uses `b.go`, and the agent fixes it by editing only `b.go`. `a.go`'s cached entry would still replay the finding. A chunk is reviewed as one unit, so any edit inside it re-reviews the whole chunk.
+
+The limit: a diff that fits in one chunk (24 KB by default) is still cached as a whole, so a re-review after any edit re-reviews all of it. Chunk boundaries depend on file sizes, so an edit that grows a file enough can move later chunks' boundaries and invalidate them as well.
 
 **Problem:** Diff modes (`unstaged`, `staged`, `commit`, `range`) cache the whole diff under a single key. In a fix loop the agent edits one file and reviews again. The diff has changed, so every chunk goes back to the model, including the ones covering files that didn't change. This is the most common prism call, and it pays full price every time.
 
@@ -63,14 +69,16 @@ Prism is run by AI coding agents (Claude Code, Codex), not by people at a termin
 
 ---
 
-### 3. Keep partial results when a chunk fails
+### 3. Keep partial results when a chunk fails (PARTIAL)
+
+**Status:** Since #2, the chunks that succeeded are cached before the error is returned, so a rerun sends only the failed chunk. The review itself still fails, and `Retry-After` is still ignored.
 
 **Problem:** `runChunkedCounted` returns an error as soon as any one chunk fails. That throws away the findings of every chunk that succeeded, whose tokens have already been paid for. Chunks often fail on 429s: `retryWithBackoff` retries 3 times at roughly 1s, 2s and 4s and ignores `Retry-After`, which a burst of 8 concurrent chunks easily outlasts. One rate-limited chunk fails the whole review, and the agent reruns it from scratch.
 
 **Solution:**
 - On 429, honor `Retry-After` when the response sends one, and back off longer than on 5xx errors.
 - When a chunk still fails, keep the other chunks' findings and record the failed chunk in `coverage.skipped`. Exit code 5 (`ExitIncomplete`) already tells the agent the review was partial.
-- With #2, the successful chunks are cached, so a rerun only sends the failed chunk.
+- ~~With #2, the successful chunks are cached, so a rerun only sends the failed chunk.~~ Done.
 - Auth errors still fail fast, since no retry will fix them.
 
 ---
@@ -336,7 +344,7 @@ The glob matching already exists in `diffutil`. For each chunk, the prompt build
 | Function context option (#13) | ~1 hr | Pass `-W` to `git diff` |
 | Token counts in JSON output (#12) | ~1 hr | `TokensUsed` already populated per provider |
 | Skip lockfiles and generated files (#10) | ~2 hrs | Default excludes plus a header check |
-| Honor `Retry-After` and keep partial chunk results (#3) | ~3 hrs | Coverage and exit 5 already exist |
+| Honor `Retry-After` and keep partial chunk results (#3) | ~2 hrs | Coverage, exit 5 and per-chunk results already exist |
 | `prism github post-comments` CLI entry point (#25) | ~3 hrs | Logic already exists in `github.go` |
 
 ---

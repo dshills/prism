@@ -60,7 +60,8 @@ review path: single, chunked, compare, codebase, per-commit range, and
 | `bytes` | int | Bytes of diff reviewed, after exclusion and truncation. |
 | `chunks` | int | Review units sent to a model: 1 for an unchunked diff, N for chunked, 0 when nothing was sent. |
 | `llmCalls` | int | Model calls made in this run, including repair passes. 0 when the result came entirely from cache. |
-| `cacheHit` | bool | The findings were replayed from cache. |
+| `cacheHit` | bool | All the findings were replayed from cache: no chunk was sent. |
+| `cachedChunks` | int | Of `chunks`, how many were replayed from cache instead of sent. Equals `chunks` when `cacheHit` is true. |
 | `truncatedBytes` | int | Bytes cut by `maxDiffBytes` (0 when not truncated). |
 | `skipped` | `[]{target, reason}` | Parts of the input not reviewed. For per-commit range, `target` is the short commit SHA. For truncation, `target` is `"diff"`. |
 | `complete` | bool | True when the whole input was reviewed: nothing skipped for an error, nothing truncated. |
@@ -77,6 +78,13 @@ nothing was missed.
 
 **Cache hits.** A cached result reports `cacheHit: true` and `llmCalls: 0`.
 `chunks` is the count the review would have used.
+
+**Partial cache hits.** A chunked diff review caches each chunk on its own, so
+some chunks can be replayed while the rest are sent. Such a review reports
+`cacheHit: false`, the full `chunks` count, the replayed ones in
+`cachedChunks`, and only the calls actually made in `llmCalls`. The text
+coverage line adds them after the chunk count:
+`Reviewed 41 files (79.4 KB) in 5 chunks (4 from cache) by openai/gpt-6-sol — 1 LLM call, 12.1s`.
 
 ### FR-2: Coverage line in text and markdown output
 

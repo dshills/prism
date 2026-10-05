@@ -200,11 +200,30 @@ func runChunkedCounted(ctx context.Context, chunks []Chunk, provider providers.R
 	if builder == nil {
 		builder = defaultPromptBuilder
 	}
+	perChunk, llmMs, calls, err := reviewChunks(ctx, chunks, nil, provider, cfg, rules, builder)
+	if err != nil {
+		return nil, llmMs, calls, err
+	}
+	return mergeChunkFindings(perChunk), llmMs, calls, nil
+}
 
-	type result struct {
-		index    int
-		findings []Finding
-		err      error
+// reviewChunks reviews chunks in parallel and returns each chunk's findings
+// by chunk index. Only the chunks whose indexes are in todo are sent to the
+// provider (all of them when todo is nil); the rest are left nil, as is a
+// chunk that failed. A chunk that succeeded is never nil (parseFindings
+// returns an empty slice for "[]"), so nil means "no result". Every
+// prompt is still built against the whole of chunks, so a chunk reviewed on
+// its own is told about the parts that were not.
+//
+// When a chunk fails, the first error in chunk order is returned together
+// with the findings of every chunk that succeeded, so the caller can keep
+// them.
+func reviewChunks(ctx context.Context, chunks []Chunk, todo []int, provider providers.Reviewer, cfg config.Config, rules *Rules, builder PromptBuilder) ([][]Finding, int64, int, error) {
+	if todo == nil {
+		todo = make([]int, len(chunks))
+		for i := range chunks {
+			todo[i] = i
+		}
 	}
 
 	// Compute effective concurrency and rate limit from config + provider defaults.
@@ -218,14 +237,15 @@ func runChunkedCounted(ctx context.Context, chunks []Chunk, provider providers.R
 	}
 	limiter := ratelimit.New(rpm)
 
-	results := make([]result, len(chunks))
+	perChunk := make([][]Finding, len(chunks))
+	errs := make([]error, len(chunks))
 	var wg sync.WaitGroup
 	sem := make(chan struct{}, concurrency)
 	var totalLLMMs int64
 	var calls int
 	var mu sync.Mutex
 
-	for i, chunk := range chunks {
+	for _, i := range todo {
 		wg.Add(1)
 		go func(i int, chunk Chunk) {
 			defer wg.Done()
@@ -233,7 +253,7 @@ func runChunkedCounted(ctx context.Context, chunks []Chunk, provider providers.R
 			defer func() { <-sem }() // release
 
 			if err := limiter.Wait(ctx); err != nil {
-				results[i] = result{index: i, err: fmt.Errorf("chunk %d: rate limiter: %w", i, err)}
+				errs[i] = fmt.Errorf("chunk %d: rate limiter: %w", i, err)
 				return
 			}
 
@@ -255,7 +275,7 @@ func runChunkedCounted(ctx context.Context, chunks []Chunk, provider providers.R
 			mu.Unlock()
 
 			if err != nil {
-				results[i] = result{index: i, err: fmt.Errorf("chunk %d: %w", i, err)}
+				errs[i] = fmt.Errorf("chunk %d: %w", i, err)
 				return
 			}
 
@@ -275,40 +295,41 @@ func runChunkedCounted(ctx context.Context, chunks []Chunk, provider providers.R
 				calls++
 				mu.Unlock()
 				if err2 != nil {
-					results[i] = result{index: i, err: fmt.Errorf("chunk %d repair: %w", i, err2)}
+					errs[i] = fmt.Errorf("chunk %d repair: %w", i, err2)
 					return
 				}
 				findings, err = parseFindings(resp2.Content)
 				if err != nil {
-					results[i] = result{index: i, err: fmt.Errorf("chunk %d validation after repair: %w", i, err)}
+					errs[i] = fmt.Errorf("chunk %d validation after repair: %w", i, err)
 					return
 				}
 				resp = resp2
 			}
 
-			findings = stampProvenance(findings, resp.Provider, resp.Model)
-			results[i] = result{index: i, findings: findings}
-		}(i, chunk)
+			perChunk[i] = stampProvenance(findings, resp.Provider, resp.Model)
+		}(i, chunks[i])
 	}
 
 	wg.Wait()
 
-	// Merge findings in stable order (by chunk index)
-	var allFindings []Finding
-	for _, r := range results {
-		if r.err != nil {
-			return nil, totalLLMMs, calls, r.err
+	for _, err := range errs {
+		if err != nil {
+			return perChunk, totalLLMMs, calls, err
 		}
-		allFindings = append(allFindings, r.findings...)
 	}
+	return perChunk, totalLLMMs, calls, nil
+}
 
-	// Deduplicate by finding ID
-	allFindings = DeduplicateFindings(allFindings)
-
-	// Sort by severity (high first), then by file path, then by line.
-	SortFindings(allFindings)
-
-	return allFindings, totalLLMMs, calls, nil
+// mergeChunkFindings joins per-chunk findings in chunk order, then
+// deduplicates and sorts them (by severity, high first, then path and line).
+func mergeChunkFindings(perChunk [][]Finding) []Finding {
+	var all []Finding
+	for _, fs := range perChunk {
+		all = append(all, fs...)
+	}
+	all = DeduplicateFindings(all)
+	SortFindings(all)
+	return all
 }
 
 // DeduplicateFindings removes duplicate findings by ID.
