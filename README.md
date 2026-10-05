@@ -195,6 +195,7 @@ All review subcommands accept these flags:
 | `--paths` | Include file path globs (comma-separated) | `**/*` |
 | `--exclude` | Exclude file path globs (comma-separated) | `vendor/**`, `**/*.gen.go`, `**/dist/**` |
 | `--rules` | Rules file path | |
+| `--no-auto-exclude` | Review lockfiles, generated code, minified assets, snapshots and deletions too | `false` |
 | `--since` | Compare with an earlier review: a prism JSON report, a SARIF log, or `last` (this repo's last review) | |
 | `--only-new` | With `--since`, report only new findings; they alone decide the exit code | `false` |
 | `--fallback` | `provider:model` to review with when the primary provider fails (auth, retries exhausted, unreachable) | |
@@ -264,6 +265,7 @@ Example `config.json`:
   "rulesFile": "",
   "baselineFile": "",
   "fallback": "",
+  "autoExclude": true,
   "cache": {
     "enabled": true,
     "dir": "",
@@ -289,6 +291,7 @@ Example `config.json`:
 | `PRISM_CHUNK_BYTES` | `chunkBytes` — target size of each review chunk (default 24000). One prompt carrying a large diff gets a shallow review, so keep this small |
 | `PRISM_MAX_CONCURRENCY` | `maxConcurrency` — parallel LLM calls per review (0 = provider default) |
 | `PRISM_RATE_LIMIT_RPM` | `rateLimitRpm` — requests per minute cap (0 = provider default) |
+| `PRISM_AUTO_EXCLUDE` | `autoExclude` — leave out files not worth reviewing (default true) |
 | `PRISM_FALLBACK` | `fallback` — `provider:model` used when the primary provider fails |
 | `PRISM_BASELINE_FILE` | `baselineFile` — baseline path, relative to the repo root (`none` turns it off) |
 | `ANTHROPIC_API_KEY` | Anthropic provider |
@@ -324,6 +327,17 @@ The comment must start with `prism:ignore`, right after a comment opener of the 
 In a language with multi-line strings or block comments (most of them), a hunk below the top of a file might begin inside a string or comment. Prism then lexes the whole file instead: the working tree, the index or the reviewed revision, whichever the review mode used. Where that file can't be read or doesn't match the diff (a GitHub PR review, for example), directives in such hunks are not honored. The finding is reported, and the baseline still works.
 
 Finding directives is best-effort. The lexer knows each language's comments and common string forms, but not every one. Rust raw and multi-line strings, YAML block scalars, and heredocs (shell, Ruby, Perl, PHP) aren't modeled, so text shaped like a directive inside them is taken as one. Anyone who can write such a string can also add a real comment, so this isn't a new way to suppress a finding, only a rare accident. When suppression has to be exact, use the baseline.
+
+## Files Left Out
+
+Besides your own `exclude` patterns, prism leaves out content a model has nothing useful to say about:
+
+- **Lockfiles:** `go.sum`, `package-lock.json`, `yarn.lock`, `pnpm-lock.yaml`, `Cargo.lock`, `poetry.lock` and the like.
+- **Generated code:** recognized by its header comment (Go's `// Code generated … DO NOT EDIT.`, or `@generated`). For an edit deep inside a file, prism reads the header from the working tree, the index or the reviewed commit, with one `git cat-file` for all files.
+- **Minified assets and source maps** (`*.min.js`, `*.min.css`, `*.js.map`), and **test snapshots** (`*.snap`, `__snapshots__/`).
+- **Sections with nothing to review:** deleted files, whose findings couldn't be verified against any new code anyway, plus renames and mode changes without edits, and binary files.
+
+Each file left out is listed in `coverage.excluded` with its reason, and in the text footer (`Excluded 3 files not worth reviewing: go.sum (lockfile), …`). Leaving them out is policy, not a gap, so it doesn't make the review incomplete. To review them anyway, set `autoExclude: false` or pass `--no-auto-exclude`.
 
 ## Comparing with an Earlier Review
 

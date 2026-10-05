@@ -27,6 +27,7 @@ var (
 	flagAllowIncomplete bool
 	// flagNoVerifyFindings turns off evidence and compile checks (FR-7).
 	flagNoVerifyFindings bool
+	flagNoAutoExclude    bool
 	flagProvider         string
 	flagModel            string
 	flagCompare          string
@@ -48,6 +49,7 @@ func addReviewFlags(cmd *cobra.Command) {
 	cmd.Flags().IntVar(&flagMaxDiffBytes, "max-diff-bytes", 0, "Maximum diff size in bytes")
 	cmd.Flags().IntVar(&flagChunkBytes, "chunk-bytes", 0, "Target size in bytes of each chunk a large diff is split into for review (default 24000)")
 	cmd.Flags().BoolVar(&flagAllowIncomplete, "allow-incomplete", false, "Exit 0 even when part of the input was not reviewed (truncated diff, skipped commit or chunk)")
+	cmd.Flags().BoolVar(&flagNoAutoExclude, "no-auto-exclude", false, "Review lockfiles, generated code, minified assets, snapshots and deletions too")
 	cmd.Flags().BoolVar(&flagNoVerifyFindings, "no-verify-findings", false, "Report findings without checking their quoted evidence or Go compile claims against the code")
 	cmd.Flags().StringVar(&flagProvider, "provider", "", "LLM provider (anthropic, openai, gemini)")
 	cmd.Flags().StringVar(&flagModel, "model", "", "Model name")
@@ -91,6 +93,9 @@ func buildOverrides() map[string]string {
 	if flagNoVerifyFindings {
 		m["verifyFindings"] = "false"
 	}
+	if flagNoAutoExclude {
+		m["autoExclude"] = "false"
+	}
 	if flagRules != "" {
 		m["rulesFile"] = flagRules
 	}
@@ -112,6 +117,8 @@ func buildDiffOpts(cfg config.Config) gitctx.DiffOptions {
 		MaxDiffBytes: cfg.MaxDiffBytes,
 		Include:      cfg.Include,
 		Exclude:      cfg.Exclude,
+		// Prism's own exclusion rules (lockfiles, generated code, ...).
+		NoAutoExclude: !cfg.ShouldAutoExclude(),
 	}
 	if flagPaths != "" {
 		opts.Include = splitComma(flagPaths)
@@ -227,6 +234,7 @@ func runCompareMode(ctx context.Context, diff gitctx.DiffResult, cfg config.Conf
 	// produced zero findings — the list represents who reviewed, not who reported.
 	report.Provenance = compareProvenance(models)
 	report.Coverage = review.CompareCoverage(review.ReviewersFromSpecs(models), len(diff.Files), diff.ReviewedBytes(), diff.TruncatedBytes, cr.Calls)
+	report.Coverage.Excluded = append(report.Coverage.Excluded, diff.Excluded...)
 
 	// Print compare summary to stderr
 	fmt.Fprintf(os.Stderr, "Compare mode: %d models, %d consensus findings, %d total\n",

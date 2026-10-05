@@ -259,6 +259,8 @@ func diffFromOptions(ctx context.Context, opts ReviewOptions, cfg config.Config)
 		MaxDiffBytes: cfg.MaxDiffBytes,
 		Include:      cfg.Include,
 		Exclude:      cfg.Exclude,
+		// Prism's own exclusion rules (lockfiles, generated code, ...).
+		NoAutoExclude: !cfg.ShouldAutoExclude(),
 	}
 	mode := opts.Mode
 	if mode == "" {
@@ -330,6 +332,7 @@ func runCompare(ctx context.Context, diff gitctx.DiffResult, cfg config.Config, 
 	report.Suppressed = suppressed
 	report.Provenance = compareProvenance(models)
 	report.Coverage = review.CompareCoverage(review.ReviewersFromSpecs(models), len(diff.Files), diff.ReviewedBytes(), diff.TruncatedBytes, cr.Calls)
+	report.Coverage.Excluded = append(report.Coverage.Excluded, diff.Excluded...)
 	return report, nil
 }
 
@@ -357,6 +360,8 @@ func runPerCommit(ctx context.Context, opts ReviewOptions, cfg config.Config) (*
 			MaxDiffBytes: cfg.MaxDiffBytes,
 			Include:      cfg.Include,
 			Exclude:      cfg.Exclude,
+			// Prism's own exclusion rules (lockfiles, generated code, ...).
+			NoAutoExclude: !cfg.ShouldAutoExclude(),
 		}
 		for _, commit := range commits {
 			shortSHA := commit.SHA

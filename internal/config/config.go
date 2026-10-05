@@ -26,7 +26,11 @@ type Config struct {
 	// VerifyFindings checks findings against the code before reporting them
 	// (evidence and Go compile claims). nil means the default, true; a pointer
 	// so an explicit false in a config file is distinguishable from unset.
-	VerifyFindings *bool  `json:"verifyFindings,omitempty"`
+	VerifyFindings *bool `json:"verifyFindings,omitempty"`
+	// AutoExclude leaves out files not worth reviewing (lockfiles, generated
+	// code, minified assets, snapshots, deletions). nil means the default,
+	// true.
+	AutoExclude    *bool  `json:"autoExclude,omitempty"`
 	MaxConcurrency int    `json:"maxConcurrency,omitempty"`
 	RateLimitRPM   int    `json:"rateLimitRpm,omitempty"`
 	RulesFile      string `json:"rulesFile,omitempty"`
@@ -201,6 +205,10 @@ func mergeFile(dst *Config, src Config) {
 		v := *src.VerifyFindings
 		dst.VerifyFindings = &v
 	}
+	if src.AutoExclude != nil {
+		v := *src.AutoExclude
+		dst.AutoExclude = &v
+	}
 	if src.MaxConcurrency > 0 {
 		dst.MaxConcurrency = src.MaxConcurrency
 	}
@@ -276,6 +284,13 @@ func mergeEnv(cfg *Config) error {
 		}
 		cfg.VerifyFindings = &b
 	}
+	if v := os.Getenv("PRISM_AUTO_EXCLUDE"); v != "" {
+		b, err := strconv.ParseBool(v)
+		if err != nil {
+			return fmt.Errorf("PRISM_AUTO_EXCLUDE must be true or false, got %q", v)
+		}
+		cfg.AutoExclude = &b
+	}
 	if v := os.Getenv("PRISM_CHUNK_BYTES"); v != "" {
 		n, err := strconv.Atoi(v)
 		if err != nil {
@@ -331,6 +346,11 @@ func mergeOverrides(cfg *Config, overrides map[string]string) {
 			cfg.MaxDiffBytes = n
 		}
 	}
+	if v, ok := overrides["autoExclude"]; ok && v != "" {
+		if b, err := strconv.ParseBool(v); err == nil {
+			cfg.AutoExclude = &b
+		}
+	}
 	if v, ok := overrides["verifyFindings"]; ok && v != "" {
 		if b, err := strconv.ParseBool(v); err == nil {
 			cfg.VerifyFindings = &b
@@ -384,6 +404,12 @@ func SetField(cfg *Config, key, value string) error {
 			return fmt.Errorf("maxDiffBytes must be an integer: %w", err)
 		}
 		cfg.MaxDiffBytes = n
+	case "autoExclude":
+		b, err := strconv.ParseBool(value)
+		if err != nil {
+			return fmt.Errorf("autoExclude must be true or false: %w", err)
+		}
+		cfg.AutoExclude = &b
 	case "verifyFindings":
 		b, err := strconv.ParseBool(value)
 		if err != nil {
@@ -412,4 +438,10 @@ func SetField(cfg *Config, key, value string) error {
 // before being reported; true unless explicitly turned off.
 func (c Config) ShouldVerifyFindings() bool {
 	return c.VerifyFindings == nil || *c.VerifyFindings
+}
+
+// ShouldAutoExclude reports whether files not worth reviewing are left out;
+// true unless explicitly turned off.
+func (c Config) ShouldAutoExclude() bool {
+	return c.AutoExclude == nil || *c.AutoExclude
 }

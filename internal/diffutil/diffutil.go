@@ -38,10 +38,27 @@ func SplitSections(diff string) []string {
 func PathFromSection(section string) string {
 	for line := range strings.SplitSeq(section, "\n") {
 		if rest, ok := strings.CutPrefix(line, "+++ b/"); ok {
-			return rest
+			// Git appends a tab to a path that has spaces in it.
+			return strings.TrimSuffix(rest, "\t")
 		}
 	}
 	return ""
+}
+
+// SectionMeta is a section's metadata: its header lines, before the first
+// hunk. Markers such as "deleted file mode" or "--- /dev/null" are looked for
+// here only, since a hunk's content lines can spell them too (a removed line
+// "-- /dev/null" is "--- /dev/null" in the diff).
+func SectionMeta(section string) string {
+	meta, _, _ := strings.Cut(section, "\n@@")
+	return meta
+}
+
+// IsNewFile reports whether a section adds a file, so its hunk holds the
+// whole file: its old side is /dev/null (a new file, a snippet, or a
+// codebase review's section).
+func IsNewFile(section string) bool {
+	return strings.Contains(SectionMeta(section)+"\n", "\n--- /dev/null\n")
 }
 
 // Line is one line of a diff section's hunks.

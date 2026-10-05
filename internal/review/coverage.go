@@ -3,6 +3,8 @@ package review
 import (
 	"fmt"
 	"strings"
+
+	"github.com/dshills/prism/internal/gitctx"
 )
 
 // Reviewer identifies a model that was asked to review, whether or not it
@@ -30,6 +32,10 @@ type Coverage struct {
 	// CachedChunks is how many of Chunks were replayed from cache instead of
 	// sent to a model. It equals Chunks on a full cache hit.
 	CachedChunks int `json:"cachedChunks"`
+	// Excluded lists the files prism's own rules left out (lockfiles,
+	// generated code, deletions, ...), and why. Leaving them out is policy,
+	// so it does not make the review incomplete.
+	Excluded []gitctx.Excluded `json:"excluded"`
 	// Fallback is set when the configured provider failed and a fallback
 	// provider reviewed instead (all or part of the input).
 	Fallback       *FallbackUse `json:"fallback,omitempty"`
@@ -78,6 +84,9 @@ func (c *Coverage) Finalize() {
 	if c.Reviewer == nil {
 		c.Reviewer = []Reviewer{}
 	}
+	if c.Excluded == nil {
+		c.Excluded = []gitctx.Excluded{}
+	}
 	c.Complete = c.TruncatedBytes == 0 && len(c.Skipped) == 0
 }
 
@@ -94,6 +103,7 @@ func (c *Coverage) Add(o Coverage, first bool) {
 	c.Chunks += o.Chunks
 	c.LLMCalls += o.LLMCalls
 	c.CachedChunks += o.CachedChunks
+	c.Excluded = append(c.Excluded, o.Excluded...)
 	if c.Fallback == nil {
 		c.Fallback = o.Fallback
 	}
@@ -150,6 +160,26 @@ func (c Coverage) Describe(llmMs int64) string {
 // value) is not mistaken for an incomplete review.
 func (c Coverage) Incomplete() bool {
 	return c.TruncatedBytes > 0 || len(c.Skipped) > 0
+}
+
+// maxExcludedShown caps how many excluded files the coverage text names.
+const maxExcludedShown = 5
+
+// ExcludedLine names the files left out by prism's rules, or is empty when
+// there are none.
+func (c Coverage) ExcludedLine() string {
+	if len(c.Excluded) == 0 {
+		return ""
+	}
+	parts := make([]string, 0, maxExcludedShown)
+	for i, e := range c.Excluded {
+		if i == maxExcludedShown {
+			parts = append(parts, fmt.Sprintf("and %d more", len(c.Excluded)-i))
+			break
+		}
+		parts = append(parts, fmt.Sprintf("%s (%s)", e.Path, e.Reason))
+	}
+	return fmt.Sprintf("Excluded %s not worth reviewing: %s", plural(len(c.Excluded), "file"), strings.Join(parts, ", "))
 }
 
 // IncompleteLine explains what was not reviewed, or is empty when nothing was

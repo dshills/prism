@@ -20,7 +20,7 @@ Prism is run by AI coding agents (Claude Code, Codex), not by people at a termin
 | 7 | Structured fix format | Workflow | High | **Done** |
 | 8 | Fallback provider | Workflow | High | **Done** |
 | 9 | Delta mode: net-new findings | Workflow | High | **Done** |
-| 10 | Skip content not worth reviewing | Tokens, Speed | High | Not started |
+| 10 | Skip content not worth reviewing | Tokens, Speed | High | **Done** |
 | 11 | Detect truncated responses | Accuracy, Tokens | High | Not started |
 | 12 | Token usage reporting | Tokens | Medium | Not started |
 | 13 | Function context around hunks | Accuracy | Medium | Not started |
@@ -233,7 +233,12 @@ When the primary provider returns an `authError` or runs out of retries, prism r
 
 ---
 
-### 10. Skip content not worth reviewing
+### 10. Skip content not worth reviewing (DONE)
+
+**Status:** Done (`internal/gitctx/autoexclude.go`). These are built-in rules, separate from the user's `exclude` patterns.
+- **What's left out:** lockfiles (by base name), minified assets and source maps, test snapshots, and generated code. Generated code is recognized by a `Code generated … DO NOT EDIT` or `@generated` comment in its first 10 lines, read from the diff when it shows line 1. Otherwise the header comes from the working tree, the index or the tip revision, with one `git cat-file --batch` for all files. Also left out: deletions, and sections with no hunks (renames, mode changes, binaries).
+- **Where and how it's reported:** it applies before truncation, and in codebase mode too. Each excluded file is listed in `coverage.excluded` with its reason and named in the text and markdown footer. It doesn't make the review incomplete.
+- **Opting out:** `autoExclude` (default true), `--no-auto-exclude` or `PRISM_AUTO_EXCLUDE`.
 
 **Problem:** The default excludes are `vendor/**`, `**/*.gen.go` and `**/dist/**`. Everything else goes to the model. That includes:
 

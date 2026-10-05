@@ -130,6 +130,9 @@ func writeTextFooter(ew *errWriter, report *review.Report) error {
 	if line := report.Coverage.Describe(report.Timing.LLMMs); line != "" {
 		ew.println(line)
 	}
+	if line := report.Coverage.ExcludedLine(); line != "" {
+		ew.println(line)
+	}
 	if line := report.Coverage.IncompleteLine(); line != "" {
 		ew.println(line)
 	}

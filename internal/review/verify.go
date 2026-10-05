@@ -104,7 +104,7 @@ func wholeFilesInDiff(diff string) map[string]string {
 	out := map[string]string{}
 	for _, sec := range diffutil.SplitSections(diff) {
 		path := diffutil.PathFromSection(sec)
-		if path == "" || !strings.Contains(sec, "\n--- /dev/null\n") {
+		if path == "" || !diffutil.IsNewFile(sec) {
 			continue
 		}
 		var b strings.Builder

@@ -89,3 +89,11 @@ func TestPostImageLines_CodebaseStyleAndHeaderlessInput(t *testing.T) {
 		t.Errorf("lines outside a hunk were returned: %+v", lines)
 	}
 }
+
+// Git appends a tab to a "+++" path with spaces; it is not part of the path.
+func TestPathFromSection_TrailingTab(t *testing.T) {
+	sec := "diff --git a/hello world.go b/hello world.go\n--- a/hello world.go\t\n+++ b/hello world.go\t\n@@ -1 +1 @@\n-a\n+b\n"
+	if got := PathFromSection(sec); got != "hello world.go" {
+		t.Errorf("PathFromSection = %q, want %q", got, "hello world.go")
+	}
+}

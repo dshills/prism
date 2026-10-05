@@ -22,6 +22,9 @@ type DiffOptions struct {
 	MaxDiffBytes int
 	Include      []string
 	Exclude      []string
+	// NoAutoExclude keeps the files prism's own rules would leave out
+	// (lockfiles, generated code, deletions; see autoExclude).
+	NoAutoExclude bool
 }
 
 // DiffResult holds the collected diff and metadata.
@@ -34,6 +37,10 @@ type DiffResult struct {
 	// TruncatedBytes is how many bytes of the diff were cut at MaxDiffBytes
 	// and so were never reviewed (0 when the diff fit).
 	TruncatedBytes int
+	// Excluded lists the files prism's own rules left out of the diff, and
+	// why. Leaving them out is policy, not a gap: the review is still
+	// complete.
+	Excluded []Excluded
 }
 
 // TruncationMarker is appended to a diff cut at MaxDiffBytes.
@@ -252,6 +259,11 @@ func buildResult(ctx context.Context, diff, mode, rangeStr string, opts DiffOpti
 		diff = filterExcluded(diff, opts.Exclude)
 		files = filterFileList(files, opts.Exclude)
 	}
+	var excluded []Excluded
+	if !opts.NoAutoExclude {
+		diff, excluded = autoExclude(diff, headsFor(ctx, meta.Root, mode, rangeStr))
+		files = withoutExcluded(files, excluded)
+	}
 
 	truncated := 0
 	if opts.MaxDiffBytes > 0 && len(diff) > opts.MaxDiffBytes {
@@ -266,7 +278,26 @@ func buildResult(ctx context.Context, diff, mode, rangeStr string, opts DiffOpti
 		Range:          rangeStr,
 		Repo:           meta,
 		TruncatedBytes: truncated,
+		Excluded:       excluded,
 	}, nil
+}
+
+// withoutExcluded is files less the excluded ones.
+func withoutExcluded(files []string, excluded []Excluded) []string {
+	if len(excluded) == 0 {
+		return files
+	}
+	drop := make(map[string]bool, len(excluded))
+	for _, e := range excluded {
+		drop[e.Path] = true
+	}
+	out := files[:0:0]
+	for _, f := range files {
+		if !drop[f] {
+			out = append(out, f)
+		}
+	}
+	return out
 }
 
 func extractFiles(diff string) []string {
@@ -410,6 +441,18 @@ func Codebase(ctx context.Context, opts DiffOptions) (DiffResult, error) {
 	if err != nil {
 		return DiffResult{}, err
 	}
+	var excluded []Excluded
+	if !opts.NoAutoExclude {
+		kept := files[:0:0]
+		for _, f := range files {
+			if reason := pathReason(f); reason != "" {
+				excluded = append(excluded, Excluded{Path: f, Reason: reason})
+				continue
+			}
+			kept = append(kept, f)
+		}
+		files = kept
+	}
 
 	// Derive a cancellable context so the consumer can abort queued reads.
 	ctx, cancel := context.WithCancel(ctx)
@@ -511,6 +554,12 @@ func Codebase(ctx context.Context, opts DiffOptions) (DiffResult, error) {
 		if s == "" {
 			continue
 		}
+		if !opts.NoAutoExclude {
+			if head, _, ok := headFromDiff(s); ok && isGenerated(head) {
+				excluded = append(excluded, Excluded{Path: path, Reason: ReasonGenerated})
+				continue
+			}
+		}
 		if opts.MaxDiffBytes > 0 && totalBytes+len(s) > opts.MaxDiffBytes {
 			cancel() // abort remaining goroutines
 			break
@@ -522,10 +571,11 @@ func Codebase(ctx context.Context, opts DiffOptions) (DiffResult, error) {
 	<-launchDone // wait for all goroutines before returning
 
 	return DiffResult{
-		Diff:  combined.String(),
-		Files: includedFiles,
-		Mode:  "codebase",
-		Repo:  meta,
+		Diff:     combined.String(),
+		Files:    includedFiles,
+		Mode:     "codebase",
+		Repo:     meta,
+		Excluded: excluded,
 	}, nil
 }
 

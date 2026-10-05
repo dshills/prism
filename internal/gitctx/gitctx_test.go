@@ -225,7 +225,7 @@ func TestBuildResult_Truncation(t *testing.T) {
 }
 
 func TestBuildResult_NotTruncated(t *testing.T) {
-	diff := "diff --git a/main.go b/main.go\n+++ b/main.go\n+ok\n"
+	diff := "diff --git a/main.go b/main.go\n+++ b/main.go\n@@ -0,0 +1 @@\n+ok\n"
 	result, err := buildResult(context.Background(), diff, "unstaged", "", DiffOptions{MaxDiffBytes: 1000})
 	if err != nil {
 		t.Fatal(err)
