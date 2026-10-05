@@ -255,6 +255,12 @@ func reviewChunks(ctx context.Context, chunks []Chunk, todo []int, provider prov
 		rpm = providers.DefaultRPM(provider.Name())
 	}
 	limiter := ratelimit.New(rpm)
+	// Reviews run side by side (ReviewCommits) share one limit and one cap
+	// on calls in flight instead.
+	shared := throttleFrom(ctx)
+	if shared != nil {
+		limiter = shared.limiter
+	}
 	// Each chunk is asked for its share of maxFindings, not all of it. The
 	// fingerprint in the cache key is the full limit's, like the note on the
 	// other parts: the share moves with the number of chunks, and a change
@@ -280,8 +286,16 @@ func reviewChunks(ctx context.Context, chunks []Chunk, todo []int, provider prov
 		wg.Add(1)
 		go func(i int, chunk Chunk) {
 			defer wg.Done()
-			sem <- struct{}{}        // acquire
-			defer func() { <-sem }() // release
+			if shared != nil {
+				if !shared.acquire(ctx) {
+					errs[i] = ctx.Err()
+					return
+				}
+				defer shared.release()
+			} else {
+				sem <- struct{}{}        // acquire
+				defer func() { <-sem }() // release
+			}
 
 			res, err := pr.review(ctx, part{diff: chunk.Diff, files: chunk.Files, note: otherPartsNote(chunks, i)}, 0)
 			mu.Lock()

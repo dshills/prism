@@ -374,22 +374,36 @@ func runPerCommit(ctx context.Context, opts ReviewOptions, cfg config.Config) (*
 			// Widen hunks to their enclosing functions.
 			FunctionContext: cfg.ShouldFunctionContext(),
 		}
-		for _, commit := range commits {
-			shortSHA := commit.SHA
+		// Commits are reviewed several at once, sharing one rate limit, and
+		// their results gathered in commit order.
+		results := review.ReviewCommits(ctx, commits, cfg,
+			func(ctx context.Context, c gitctx.CommitInfo) (gitctx.DiffResult, error) {
+				return gitctx.Commit(ctx, c.SHA, "", diffOpts)
+			}, nil)
+		// An authentication error first: it cancels the other commits,
+		// whose errors only say so.
+		for _, r := range results {
+			if providers.IsAuthError(r.Err) {
+				return r.Err
+			}
+		}
+		for _, r := range results {
+			if r.Err != nil {
+				return r.Err
+			}
+		}
+		for _, r := range results {
+			shortSHA := r.Commit.SHA
 			if len(shortSHA) > 7 {
 				shortSHA = shortSHA[:7]
 			}
-			diff, err := gitctx.Commit(ctx, commit.SHA, "", diffOpts)
-			if err != nil {
-				cov.Skipped = append(cov.Skipped, review.Skip{Target: shortSHA, Reason: "error getting diff: " + err.Error()})
+			if r.DiffErr != nil {
+				cov.Skipped = append(cov.Skipped, review.Skip{Target: shortSHA, Reason: "error getting diff: " + r.DiffErr.Error()})
 				continue
 			}
-			if strings.TrimSpace(diff.Diff) == "" {
-				continue
-			}
-			report, err := review.Run(ctx, diff, cfg)
-			if err != nil {
-				return err
+			report := r.Report
+			if report == nil {
+				continue // empty diff
 			}
 			cov.Add(report.Coverage, reviewed == 0)
 			reviewed++

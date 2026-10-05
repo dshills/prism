@@ -264,6 +264,14 @@ func reviewWholeCached(ctx context.Context, redactedDiff string, files []string,
 	defer noteFallback(cov, provider)
 
 	pr := &partReviewer{provider: provider, cfg: cfg, rules: rules, builder: builder}
+	if shared := throttleFrom(ctx); shared != nil {
+		// One of several reviews run side by side: it takes its turn.
+		if !shared.acquire(ctx) {
+			return nil, 0, ctx.Err()
+		}
+		defer shared.release()
+		pr.limiter = shared.limiter
+	}
 	res, err := pr.review(ctx, part{diff: redactedDiff, files: files}, 0)
 	cov.LLMCalls += res.calls
 	cov.Splits += res.splits

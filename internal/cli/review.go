@@ -212,6 +212,14 @@ func runReview(ctx context.Context, diff gitctx.DiffResult, cfg config.Config) {
 	exitCode = finishExit(shown, cfg.FailOn, flagAllowIncomplete)
 }
 
+// shortCommit is a commit SHA cut to seven characters.
+func shortCommit(sha string) string {
+	if len(sha) > 7 {
+		return sha[:7]
+	}
+	return sha
+}
+
 // finishExit is the exit code for a report that was produced and written:
 // findings at or above failOn win, then an incomplete review, then success
 // (specs/SPEC-review-integrity.md FR-3).
@@ -316,41 +324,42 @@ func runPerCommitReview(ctx context.Context, revRange string, cfg config.Config)
 	cov := review.NewCoverage(review.ConfigReviewer(cfg.Provider, cfg.Model), 0, 0, 0)
 	reviewed := 0
 
-	for i, c := range commits {
-		shortSHA := c.SHA
-		if len(shortSHA) > 7 {
-			shortSHA = shortSHA[:7]
+	// Commits are reviewed several at once, sharing one rate limit, and
+	// their results gathered in commit order.
+	results := review.ReviewCommits(ctx, commits, cfg,
+		func(ctx context.Context, c gitctx.CommitInfo) (gitctx.DiffResult, error) {
+			return gitctx.Commit(ctx, c.SHA, "", buildDiffOpts(cfg))
+		},
+		func(i int) {
+			fmt.Fprintf(os.Stderr, "Reviewing commit %d/%d: %s %s\n", i+1, len(commits), shortCommit(commits[i].SHA), commits[i].Subject)
+		})
+	for _, r := range results {
+		if providers.IsAuthError(r.Err) {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", r.Err)
+			exitCode = ExitAuthError
+			return
 		}
-		fmt.Fprintf(os.Stderr, "Reviewing commit %d/%d: %s %s\n", i+1, len(commits), shortSHA, c.Subject)
+	}
+	if ctx.Err() != nil {
+		return // context cancelled — stop immediately
+	}
 
-		diff, err := gitctx.Commit(ctx, c.SHA, "", buildDiffOpts(cfg))
-		if err != nil {
-			if ctx.Err() != nil {
-				return // context cancelled — stop immediately
-			}
-			fmt.Fprintf(os.Stderr, "  Skipping (error getting diff): %v\n", err)
-			cov.Skipped = append(cov.Skipped, review.Skip{Target: shortSHA, Reason: "error getting diff: " + err.Error()})
+	for _, r := range results {
+		shortSHA := shortCommit(r.Commit.SHA)
+		switch {
+		case r.DiffErr != nil:
+			fmt.Fprintf(os.Stderr, "  Skipping %s (error getting diff): %v\n", shortSHA, r.DiffErr)
+			cov.Skipped = append(cov.Skipped, review.Skip{Target: shortSHA, Reason: "error getting diff: " + r.DiffErr.Error()})
+			continue
+		case r.Err != nil:
+			fmt.Fprintf(os.Stderr, "  Error reviewing commit %s: %v\n", shortSHA, r.Err)
+			cov.Skipped = append(cov.Skipped, review.Skip{Target: shortSHA, Reason: "review failed: " + r.Err.Error()})
+			continue
+		case r.Report == nil:
+			fmt.Fprintf(os.Stderr, "  Skipping %s (empty diff)\n", shortSHA)
 			continue
 		}
-		if strings.TrimSpace(diff.Diff) == "" {
-			fmt.Fprintf(os.Stderr, "  Skipping (empty diff)\n")
-			continue
-		}
-
-		report, err := review.Run(ctx, diff, cfg)
-		if err != nil {
-			if providers.IsAuthError(err) {
-				fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-				exitCode = ExitAuthError
-				return
-			}
-			if ctx.Err() != nil {
-				return // context cancelled — stop immediately
-			}
-			fmt.Fprintf(os.Stderr, "  Error reviewing commit %s: %v\n", shortSHA, err)
-			cov.Skipped = append(cov.Skipped, review.Skip{Target: shortSHA, Reason: "review failed: " + err.Error()})
-			continue
-		}
+		report := r.Report
 		cov.Add(report.Coverage, reviewed == 0)
 		reviewed++
 
@@ -364,7 +373,7 @@ func runPerCommitReview(ctx context.Context, revRange string, cfg config.Config)
 		allFindings = append(allFindings, report.Findings...)
 		allDiscarded = append(allDiscarded, review.StampCommit(report.Discarded, shortSHA)...)
 		allSuppressed = append(allSuppressed, review.StampSuppressedCommit(report.Suppressed, shortSHA)...)
-		allFiles = append(allFiles, diff.Files...)
+		allFiles = append(allFiles, r.Files...)
 		totalLLMMs += report.Timing.LLMMs
 	}
 
@@ -665,7 +674,7 @@ func init() {
 
 	// Range-specific flags
 	reviewRangeCmd.Flags().BoolVar(&flagMergeBase, "merge-base", true, "Use merge base for branch comparisons")
-	reviewRangeCmd.Flags().BoolVar(&flagPerCommit, "per-commit", false, "Review each commit separately and aggregate findings")
+	reviewRangeCmd.Flags().BoolVar(&flagPerCommit, "per-commit", false, "Review each commit separately, several at once under one rate limit, and aggregate findings")
 
 	// Snippet-specific flags
 	reviewSnippetCmd.Flags().StringVar(&flagSnippetPath, "path", "", "File path (for language detection and messages)")

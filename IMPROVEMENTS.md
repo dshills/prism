@@ -32,7 +32,7 @@ Prism is run by AI coding agents (Claude Code, Codex), not by people at a termin
 | 19 | Reasoning effort control | Speed, Tokens | Medium | **Done** |
 | 20 | Local JSON salvage before the repair call | Tokens, Speed | Medium | **Done** |
 | 21 | Second-opinion check for blocking findings | Accuracy | Low | **Done** |
-| 22 | Concurrent per-commit review | Speed | Low | Not started |
+| 22 | Concurrent per-commit review | Speed | Low | **Done** |
 | 23 | Trim repeated per-chunk prompt overhead | Tokens | Low | Not started |
 | 24 | Confidence calibration | Accuracy | Low | Not started |
 | 25 | `prism github post-comments` | Workflow | Low | Not started |
@@ -450,7 +450,14 @@ The glob matching already exists in `diffutil`. For each chunk, the prompt build
 
 ---
 
-### 22. Concurrent per-commit review
+### 22. Concurrent per-commit review (DONE)
+
+**Status:** Done.
+- **Shared runner:** `review.ReviewCommits` reviews up to 4 commits at once and returns their results in commit order. The CLI and `pkg/prism` both use it and keep their own skip and error handling.
+- **One throttle:** every review in it shares one `Throttle`, carried in the context. That's one rate limiter and one cap on calls in flight, from `maxConcurrency` / `rateLimitRpm` or the provider's defaults.
+  - Chunked reviews take a slot per chunk, and whole-diff reviews take one for the diff (they had no limiter before).
+  - The provider sees no more traffic than a single review would make.
+- **Auth errors:** an authentication error cancels the commits not yet started.
 
 **Problem:** `runPerCommitReview` reviews commits one at a time. Each commit's chunks run in parallel, but a 20-commit range takes about 20 times as long as a single review.
 
