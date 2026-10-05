@@ -41,6 +41,7 @@ var (
 )
 
 func addReviewFlags(cmd *cobra.Command) {
+	addDeltaFlags(cmd)
 	cmd.Flags().StringVar(&flagPaths, "paths", "", "Include file path globs (comma-separated)")
 	cmd.Flags().StringVar(&flagExclude, "exclude", "", "Exclude file path globs (comma-separated)")
 	cmd.Flags().IntVar(&flagContextLines, "context-lines", 0, "Number of context lines in diff")
@@ -167,13 +168,19 @@ func runReview(ctx context.Context, diff gitctx.DiffResult, cfg config.Config) {
 		return
 	}
 
-	if err := output.WriteReport(report, cfg.Format, flagOut); err != nil {
+	shown, derr := withDelta(ctx, report, cfg, diff.Files)
+	if derr != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", derr)
+		exitCode = ExitRuntimeError
+		return
+	}
+	if err := output.WriteReport(shown, cfg.Format, flagOut); err != nil {
 		fmt.Fprintf(os.Stderr, "Error writing output: %v\n", err)
 		exitCode = ExitRuntimeError
 		return
 	}
-	rememberReport(report, cfg)
-	exitCode = finishExit(report, cfg.FailOn, flagAllowIncomplete)
+	rememberReport(report, cfg) // the full report, not a --only-new view
+	exitCode = finishExit(shown, cfg.FailOn, flagAllowIncomplete)
 }
 
 // finishExit is the exit code for a report that was produced and written:
@@ -276,6 +283,7 @@ func runPerCommitReview(ctx context.Context, revRange string, cfg config.Config)
 	var allFindings []review.Finding
 	allDiscarded := []review.Discard{}
 	allSuppressed := []review.Suppression{}
+	allFiles := []string{} // what the commits covered, for --since
 	var totalLLMMs int64
 	// FR-1: coverage summed over reviewed commits; a commit that could not be
 	// reviewed is a skip, which makes the report incomplete.
@@ -330,6 +338,7 @@ func runPerCommitReview(ctx context.Context, revRange string, cfg config.Config)
 		allFindings = append(allFindings, report.Findings...)
 		allDiscarded = append(allDiscarded, review.StampCommit(report.Discarded, shortSHA)...)
 		allSuppressed = append(allSuppressed, review.StampSuppressedCommit(report.Suppressed, shortSHA)...)
+		allFiles = append(allFiles, diff.Files...)
 		totalLLMMs += report.Timing.LLMMs
 	}
 
@@ -356,13 +365,19 @@ func runPerCommitReview(ctx context.Context, revRange string, cfg config.Config)
 	report.Discarded = allDiscarded
 	report.Suppressed = allSuppressed
 
-	if err := output.WriteReport(report, cfg.Format, flagOut); err != nil {
+	shown, derr := withDelta(ctx, report, cfg, allFiles)
+	if derr != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", derr)
+		exitCode = ExitRuntimeError
+		return
+	}
+	if err := output.WriteReport(shown, cfg.Format, flagOut); err != nil {
 		fmt.Fprintf(os.Stderr, "Error writing output: %v\n", err)
 		exitCode = ExitRuntimeError
 		return
 	}
-	rememberReport(report, cfg)
-	exitCode = finishExit(report, cfg.FailOn, flagAllowIncomplete)
+	rememberReport(report, cfg) // the full report, not a --only-new view
+	exitCode = finishExit(shown, cfg.FailOn, flagAllowIncomplete)
 }
 
 var reviewCmd = &cobra.Command{
@@ -580,13 +595,19 @@ func runCodebaseReview(ctx context.Context, diff gitctx.DiffResult, cfg config.C
 		return
 	}
 
-	if err := output.WriteReport(report, cfg.Format, flagOut); err != nil {
+	shown, derr := withDelta(ctx, report, cfg, diff.Files)
+	if derr != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", derr)
+		exitCode = ExitRuntimeError
+		return
+	}
+	if err := output.WriteReport(shown, cfg.Format, flagOut); err != nil {
 		fmt.Fprintf(os.Stderr, "Error writing output: %v\n", err)
 		exitCode = ExitRuntimeError
 		return
 	}
-	rememberReport(report, cfg)
-	exitCode = finishExit(report, cfg.FailOn, flagAllowIncomplete)
+	rememberReport(report, cfg) // the full report, not a --only-new view
+	exitCode = finishExit(shown, cfg.FailOn, flagAllowIncomplete)
 }
 
 func init() {

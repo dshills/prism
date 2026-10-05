@@ -60,11 +60,11 @@ func (t *TextWriter) Write(w io.Writer, report *review.Report) error {
 		for _, f := range findings {
 			loc := primaryLocation(f)
 			if loc.Commit != "" {
-				ew.printf("\n  %s:%d-%d (%s)  %s\n",
-					loc.Path, loc.Lines.Start, loc.Lines.End, loc.Commit, f.Title)
+				ew.printf("\n  %s:%d-%d (%s)  %s%s\n",
+					loc.Path, loc.Lines.Start, loc.Lines.End, loc.Commit, f.Title, deltaMark(f))
 			} else {
-				ew.printf("\n  %s:%d-%d  %s\n",
-					loc.Path, loc.Lines.Start, loc.Lines.End, f.Title)
+				ew.printf("\n  %s:%d-%d  %s%s\n",
+					loc.Path, loc.Lines.Start, loc.Lines.End, f.Title, deltaMark(f))
 			}
 			ew.printf("  Category: %s | Confidence: %.0f%% | ID: %s\n",
 				f.Category, f.Confidence*100, f.ID)
@@ -110,6 +110,14 @@ func writeTextFooter(ew *errWriter, report *review.Report) error {
 			ew.printf("  %s:%d  %s — %s\n", loc.Path, loc.Lines.Start, d.Finding.Title, d.Reason)
 		}
 	}
+	// A comparison with an earlier review (--since) says what changed.
+	if d := report.Delta; d != nil {
+		ew.printf("\n%s\n", d.DeltaLine())
+		for _, f := range d.Resolved {
+			loc := primaryLocation(f)
+			ew.printf("  resolved  %s:%d  %s\n", loc.Path, loc.Lines.Start, f.Title)
+		}
+	}
 	// Accepted findings are listed too, so the report says what it left out.
 	if n := len(report.Suppressed); n > 0 {
 		ew.printf("\nSuppressed %d accepted finding(s):\n", n)
@@ -128,6 +136,15 @@ func writeTextFooter(ew *errWriter, report *review.Report) error {
 	ew.printf("Completed in %dms (git: %dms, LLM: %dms)\n",
 		report.Timing.TotalMs, report.Timing.GitMs, report.Timing.LLMMs)
 	return ew.err
+}
+
+// deltaMark tags a finding compared with an earlier review: "  [new]" or
+// "  [persisting]", or nothing without a comparison.
+func deltaMark(f review.Finding) string {
+	if f.Delta == "" {
+		return ""
+	}
+	return "  [" + f.Delta + "]"
 }
 
 // suppressionSource names where a suppression came from.

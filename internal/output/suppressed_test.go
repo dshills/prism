@@ -123,3 +123,44 @@ func TestWriters_ShowFix(t *testing.T) {
 		t.Errorf("markdown lacks the fix diff:\n%s", md.String())
 	}
 }
+
+// A SARIF log prism wrote can be read back as the --since review: the IDs
+// survive, and the delta is written as baselineState.
+func TestSARIF_RoundTripsAsPriorReview(t *testing.T) {
+	r := suppressedReport()
+	prior := &review.PriorReview{Findings: []review.Finding{r.Findings[0]}}
+	r = review.ApplyDelta(r, prior, "x", nil, false)
+
+	var buf bytes.Buffer
+	if err := (&SARIFWriter{}).Write(&buf, r); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(buf.String(), `"baselineState": "unchanged"`) {
+		t.Errorf("SARIF lacks baselineState for the persisting finding")
+	}
+	back, err := review.ReadPriorReview(buf.Bytes())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(back.Findings) != 1 || back.Findings[0].ID != r.Findings[0].ID || back.Findings[0].Severity != r.Findings[0].Severity || len(back.Accepted) != 2 {
+		t.Errorf("read back %d findings (ID %v), %d accepted; want the finding and both suppressed ones", len(back.Findings), back.Findings, len(back.Accepted))
+	}
+}
+
+// Text marks each finding's delta and lists what was resolved.
+func TestTextWriter_Delta(t *testing.T) {
+	r := suppressedReport()
+	prior := &review.PriorReview{Findings: []review.Finding{
+		{ID: "gone", Title: "Fixed already", Locations: []review.Location{{Path: "db.go", Lines: review.LineRange{Start: 3}}}},
+	}}
+	r = review.ApplyDelta(r, prior, "last", nil, false)
+	var buf bytes.Buffer
+	if err := (&TextWriter{}).Write(&buf, r); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"SQL injection  [new]", "Since last: 1 new, 0 persisting, 1 resolved", "resolved  db.go:3  Fixed already"} {
+		if !strings.Contains(buf.String(), want) {
+			t.Errorf("text lacks %q:\n%s", want, buf.String())
+		}
+	}
+}

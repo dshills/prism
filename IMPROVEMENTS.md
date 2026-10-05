@@ -19,7 +19,7 @@ Prism is run by AI coding agents (Claude Code, Codex), not by people at a termin
 | 6 | Native structured output | Accuracy, Tokens | High | **Done** |
 | 7 | Structured fix format | Workflow | High | **Done** |
 | 8 | Fallback provider | Workflow | High | **Done** |
-| 9 | Delta mode: net-new findings | Workflow | High | Not started |
+| 9 | Delta mode: net-new findings | Workflow | High | **Done** |
 | 10 | Skip content not worth reviewing | Tokens, Speed | High | Not started |
 | 11 | Detect truncated responses | Accuracy, Tokens | High | Not started |
 | 12 | Token usage reporting | Tokens | Medium | Not started |
@@ -215,7 +215,14 @@ When the primary provider returns an `authError` or runs out of retries, prism r
 
 ---
 
-### 9. Delta mode: surface only net-new findings
+### 9. Delta mode: surface only net-new findings (DONE)
+
+**Status:** Done.
+- **The flags:** `--since <prism JSON | SARIF | last>` and `--only-new` work on every review command and on `prism github`, where `--only-new` posts only new comments. `last` is the repo's last review, which the CLI already keeps from #5; with no previous review, every finding is new.
+- **Comparing:** `review.ApplyDelta` matches by finding ID (#4) and labels each finding `new` or `persisting`. It lists **resolved** earlier findings only for files this review covered (the rest count as `outOfScope`), and never reports an accepted (suppressed) finding as new or resolved. An incomplete review counts nothing as resolved.
+- **`--only-new`:** findings and the exit code are limited to new ones, but the remembered last review stays the full report, so the next run doesn't see persisting findings as new.
+- **Output:** text marks `[new]`/`[persisting]` and lists resolved findings, markdown does the same, and SARIF sets `baselineState`. Reading a SARIF log back uses the same `partialFingerprints` key the writer uses.
+- **Usage error:** `--only-new` without `--since` exits 2 before any review runs.
 
 **Problem:** In a fix loop, the agent fixes three findings and reviews again. The new report mixes leftover findings, new findings caused by the fix, and different wording of findings it already saw, since LLM output isn't deterministic. The agent can't tell whether it's making progress or going in circles.
 

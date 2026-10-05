@@ -44,6 +44,9 @@ type sarifRun struct {
 
 type sarifRunProperties struct {
 	Coverage review.Coverage `json:"coverage"`
+	// Delta records a comparison with an earlier review (--since), so a
+	// log written with --only-new is not later taken for a full review.
+	Delta *review.DeltaSummary `json:"delta,omitempty"`
 }
 
 type sarifTool struct {
@@ -105,7 +108,10 @@ type sarifResult struct {
 	// scanning and other consumers track the same issue across runs even
 	// when its lines move.
 	PartialFingerprints map[string]string `json:"partialFingerprints,omitempty"`
-	Fixes               []sarifFix        `json:"fixes,omitempty"`
+	// BaselineState is "new" or "unchanged" when the review was compared
+	// with an earlier one (--since).
+	BaselineState string     `json:"baselineState,omitempty"`
+	Fixes         []sarifFix `json:"fixes,omitempty"`
 	// Suppressions marks a finding accepted by the baseline (external) or an
 	// inline prism:ignore (inSource). Code scanning shows it as dismissed.
 	Suppressions []sarifSuppression     `json:"suppressions,omitempty"`
@@ -143,8 +149,8 @@ func sarifSuppressionFor(s *review.Suppression) sarifSuppression {
 }
 
 // sarifFingerprintKey names prism's finding ID among a result's partial
-// fingerprints. The version changes if the fingerprint scheme does.
-const sarifFingerprintKey = "prismFindingId/v1"
+// fingerprints; the reader of earlier reviews (--since) uses the same key.
+const sarifFingerprintKey = review.SARIFFingerprintKey
 
 // sarifResultProperties carries per-finding provenance. Consumers link a
 // result to its producing extension by matching (provider, model) against
@@ -209,6 +215,12 @@ func buildSARIF(report *review.Report) sarifLog {
 		}
 		if f.ID != "" {
 			result.PartialFingerprints = map[string]string{sarifFingerprintKey: f.ID}
+		}
+		switch f.Delta {
+		case review.DeltaNew:
+			result.BaselineState = "new"
+		case review.DeltaPersisting:
+			result.BaselineState = "unchanged"
 		}
 
 		for _, loc := range f.Locations {
@@ -275,7 +287,7 @@ func buildSARIF(report *review.Report) sarifLog {
 			{
 				Tool:       tool,
 				Results:    results,
-				Properties: &sarifRunProperties{Coverage: report.Coverage},
+				Properties: &sarifRunProperties{Coverage: report.Coverage, Delta: report.Delta},
 			},
 		},
 	}

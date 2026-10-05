@@ -86,6 +86,9 @@ type Finding struct {
 	// is removed during verification (TagFixDropped). nil when the model gave
 	// none.
 	Fix *Fix `json:"fix,omitempty"`
+	// Delta is DeltaNew or DeltaPersisting when the review was compared with
+	// an earlier one (--since); empty otherwise.
+	Delta string `json:"delta,omitempty"`
 	// Provider is the LLM vendor that produced this finding
 	// (e.g. "anthropic", "openai"). Empty only for legacy/test data.
 	Provider string `json:"provider,omitempty"`
@@ -162,6 +165,8 @@ type Report struct {
 	// prism:ignore, with where the acceptance came from. They are not in
 	// Findings or Summary, so they never decide the exit code.
 	Suppressed []Suppression `json:"suppressed"`
+	// Delta compares this review with an earlier one, when asked (--since).
+	Delta *DeltaSummary `json:"delta,omitempty"`
 }
 
 // Discard is a finding removed by verification, and why.

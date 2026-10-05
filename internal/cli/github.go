@@ -108,6 +108,16 @@ var githubCmd = &cobra.Command{
 			return nil
 		}
 
+		// Compare with an earlier review (--since), so --only-new posts only
+		// what is new.
+		full := report
+		report, err = withDelta(ctx, report, cfg, files)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			exitCode = ExitRuntimeError
+			return nil
+		}
+
 		// Write local output
 		if err := output.WriteReport(report, cfg.Format, flagOut); err != nil {
 			fmt.Fprintf(os.Stderr, "Error writing output: %v\n", err)
@@ -138,7 +148,7 @@ var githubCmd = &cobra.Command{
 
 		// Fail-on threshold first, then exit 5 for a partial review (a
 		// truncated diff or a failed chunk), as review does (FR-3).
-		rememberReport(report, cfg)
+		rememberReport(full, cfg)
 		exitCode = finishExit(report, cfg.FailOn, flagAllowIncomplete)
 		return nil
 	},

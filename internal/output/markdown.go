@@ -41,6 +41,7 @@ func (m *MarkdownWriter) Write(w io.Writer, report *review.Report) error {
 			ew.println("No issues found. :white_check_mark:")
 		}
 		writeMarkdownDiscarded(ew, report)
+		writeMarkdownDelta(ew, report)
 		writeMarkdownSuppressed(ew, report)
 		return ew.err
 	}
@@ -60,7 +61,7 @@ func (m *MarkdownWriter) Write(w io.Writer, report *review.Report) error {
 
 		for _, f := range findings {
 			loc := mdPrimaryLocation(f)
-			ew.printf("### %s\n\n", f.Title)
+			ew.printf("### %s%s\n\n", f.Title, deltaMark(f))
 			if loc.Commit != "" {
 				ew.printf("**`%s:%d-%d`** | %s | Confidence: %.0f%% | Commit: `%s` | ID: `%s`\n\n",
 					loc.Path, loc.Lines.Start, loc.Lines.End, f.Category, f.Confidence*100, loc.Commit, f.ID)
@@ -97,6 +98,7 @@ func (m *MarkdownWriter) Write(w io.Writer, report *review.Report) error {
 		report.Timing.TotalMs, report.Timing.GitMs, report.Timing.LLMMs)
 
 	writeMarkdownDiscarded(ew, report)
+	writeMarkdownDelta(ew, report)
 	writeMarkdownSuppressed(ew, report)
 	return ew.err
 }
@@ -210,6 +212,25 @@ func prefixLines(s, prefix string) string {
 		lines[i] = prefix + l
 	}
 	return strings.Join(lines, "\n")
+}
+
+// writeMarkdownDelta states the comparison with an earlier review and lists
+// what it resolved.
+func writeMarkdownDelta(ew *errWriter, report *review.Report) {
+	d := report.Delta
+	if d == nil {
+		return
+	}
+	ew.printf("\n%s\n", d.DeltaLine())
+	if len(d.Resolved) == 0 {
+		return
+	}
+	ew.printf("\n<details><summary>Resolved %d finding(s)</summary>\n\n", len(d.Resolved))
+	for _, f := range d.Resolved {
+		loc := mdPrimaryLocation(f)
+		ew.printf("- `%s:%d` %s\n", loc.Path, loc.Lines.Start, f.Title)
+	}
+	ew.println("\n</details>")
 }
 
 // writeMarkdownSuppressed lists findings accepted by the baseline or an

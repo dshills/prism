@@ -195,6 +195,8 @@ All review subcommands accept these flags:
 | `--paths` | Include file path globs (comma-separated) | `**/*` |
 | `--exclude` | Exclude file path globs (comma-separated) | `vendor/**`, `**/*.gen.go`, `**/dist/**` |
 | `--rules` | Rules file path | |
+| `--since` | Compare with an earlier review: a prism JSON report, a SARIF log, or `last` (this repo's last review) | |
+| `--only-new` | With `--since`, report only new findings; they alone decide the exit code | `false` |
 | `--fallback` | `provider:model` to review with when the primary provider fails (auth, retries exhausted, unreachable) | |
 | `--baseline` | Baseline of accepted findings; `none` reports them all | `.prism-baseline.json` at the repo root |
 | `--no-redact` | Disable secret redaction (prints warning) | `false` |
@@ -322,6 +324,17 @@ The comment must start with `prism:ignore`, right after a comment opener of the 
 In a language with multi-line strings or block comments (most of them), a hunk below the top of a file might begin inside a string or comment. Prism then lexes the whole file instead: the working tree, the index or the reviewed revision, whichever the review mode used. Where that file can't be read or doesn't match the diff (a GitHub PR review, for example), directives in such hunks are not honored. The finding is reported, and the baseline still works.
 
 Finding directives is best-effort. The lexer knows each language's comments and common string forms, but not every one. Rust raw and multi-line strings, YAML block scalars, and heredocs (shell, Ruby, Perl, PHP) aren't modeled, so text shaped like a directive inside them is taken as one. Anyone who can write such a string can also add a real comment, so this isn't a new way to suppress a finding, only a rare accident. When suppression has to be exact, use the baseline.
+
+## Comparing with an Earlier Review
+
+In a fix loop, the agent fixes some findings and reviews again. The new report mixes leftovers, regressions and rewordings, so it's hard to tell whether the loop is making progress. `--since` compares the review with an earlier one by finding ID:
+
+```bash
+prism review staged --since last              # this repo's previous review
+prism review range origin/main..HEAD --since base.sarif --only-new
+```
+
+Each finding is marked `new` or `persisting` (`delta` in JSON, `[new]` in text, SARIF `baselineState`). The report's `delta` summary counts them and lists what was **resolved**. An earlier finding in a file this review didn't cover is counted as out of scope, not resolved, and a finding accepted in the meantime is neither. An incomplete review (a failed chunk, a truncated diff) counts nothing as resolved, because a missing finding may only have gone unreviewed. With `--only-new`, only new findings are reported and decide the exit code. `last` with no previous review counts every finding as new, so a loop can use it from the first run, and the remembered last review is always the full one.
 
 ## Rules Packs
 
