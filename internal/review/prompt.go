@@ -86,7 +86,7 @@ func buildUserPrompt(diff string, files []string, maxFindings int, failOn, minSe
 	}
 
 	// Rules-based instructions
-	if rulesSection := BuildRulesPromptSection(rules); rulesSection != "" {
+	if rulesSection := rulesSectionFor(rules, files); rulesSection != "" {
 		b.WriteString(rulesSection)
 	}
 
@@ -166,7 +166,7 @@ func BuildCodebaseUserPrompt(diff string, files []string, maxFindings int, maxFi
 		fmt.Fprintf(b, "Languages: %s\n", strings.Join(langs, ", "))
 	}
 
-	if rulesSection := BuildRulesPromptSection(rules); rulesSection != "" {
+	if rulesSection := rulesSectionFor(rules, files); rulesSection != "" {
 		b.WriteString(rulesSection)
 	}
 

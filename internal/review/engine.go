@@ -106,6 +106,12 @@ func promptFingerprint(builder PromptBuilder, cfg config.Config, rules *Rules) s
 	if cfg.ReasoningEffort != "" { // unset keeps the keys from before effort existed
 		key += "\x00effort=" + cfg.ReasoningEffort
 	}
+	if rules != nil && len(rules.Sets) > 0 {
+		// Rule sets render only for the files they match, so the probe
+		// prompt may leave them out: they are keyed whole instead.
+		sets, _ := json.Marshal(rules.Sets)
+		key += "\x00sets=" + string(sets)
+	}
 	h := sha256.Sum256([]byte(key))
 	return fmt.Sprintf("%x", h[:16])
 }

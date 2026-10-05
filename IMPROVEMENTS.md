@@ -28,7 +28,7 @@ Prism is run by AI coding agents (Claude Code, Codex), not by people at a termin
 | 15 | Severity floor in the prompt | Tokens, Speed | Medium | **Done** |
 | 16 | ~~Low-temperature sampling~~ | Accuracy | — | **Dropped** (see #16) |
 | 17 | Language-specific system prompts | Accuracy | Medium | **Done** |
-| 18 | Per-directory / per-language rules | Accuracy | Medium | Not started |
+| 18 | Per-directory / per-language rules | Accuracy | Medium | **Done** |
 | 19 | Reasoning effort control | Speed, Tokens | Medium | **Done** |
 | 20 | Local JSON salvage before the repair call | Tokens, Speed | Medium | Not started |
 | 21 | Second-opinion check for blocking findings | Accuracy | Low | Not started |
@@ -363,7 +363,16 @@ The lever these models offer is reasoning effort (#19). Run-to-run consistency c
 
 ---
 
-### 18. Per-directory / per-language rules
+### 18. Per-directory / per-language rules (DONE)
+
+**Status:** Done. They live in the rules file, not the main config, next to the rules they extend.
+- **Format:** `sets` is a list of rule sets, each with `paths` (one glob or a list), `focus`, `severityOverrides` and `required`. The file can also be a bare list of sets.
+  - Sets don't nest. `paths` at the top level, or a glob that can't be parsed, is an error.
+- **Globs:** a matcher in `rules.go` handles `**` across any number of directories. `gitctx.MatchesAny` matches `**` one level only. A pattern without a slash matches the file name.
+- **Prompt:** each chunk gets the top-level rules plus the sets matching its files. A set matching only some of them names those files (up to 20).
+- **Overrides:** `ApplySeverityOverrides` applies the top-level overrides, then each matching set's by the finding's own path, later sets winning.
+- **Cache:** sets render only for matching files, so the prompt fingerprint also keys the sets' JSON.
+- **Not covered:** a per-path reasoning effort (#19). A request has a single effort, and a chunk can mix paths.
 
 **Problem:** Rules packs apply globally. You can't enforce strict security rules for `internal/auth/**` and be lenient about style in `**/*_test.go`. Agents get blocked by low-value findings in test code, or let high-risk code through at a lax threshold.
 

@@ -393,6 +393,25 @@ prism review staged --rules rules.json
 - **severityOverrides**: override default severity for specific categories
 - **required**: checks that must be mentioned in the review
 
+### Rule sets for parts of the repository
+
+`sets` applies rules to some paths only, on top of the top-level rules. Later sets win where their overrides overlap.
+
+```json
+{
+  "focus": ["correctness"],
+  "sets": [
+    { "paths": "internal/auth/**", "focus": ["security"], "severityOverrides": { "security": "high" } },
+    { "paths": ["**/*_test.go", "testdata/**"], "severityOverrides": { "style": "low" } }
+  ]
+}
+```
+
+- **paths**: one glob or a list. `**` matches any number of directories, and a pattern without a slash (`*_test.go`) matches the file name in any directory. A set without `paths` applies everywhere.
+- **Prompt:** each review chunk is given the top-level rules plus the sets that match its files. A set that matches only some of the chunk's files names them.
+- **Overrides:** severity overrides are applied by each finding's own file.
+- **List form:** the file can also be a list of sets, with no top-level rules.
+
 ## Providers
 
 ### Supported Providers
