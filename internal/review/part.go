@@ -111,6 +111,7 @@ func (r *partReviewer) ask(ctx context.Context, p part, maxTokens int) (partResu
 		SystemPrompt: sysPr,
 		UserPrompt:   userPr,
 		MaxTokens:    maxTokens,
+		Effort:       r.cfg.ReasoningEffort,
 		Output:       findingsOutput,
 	})
 	res.llmMs += time.Since(start).Milliseconds()
@@ -131,6 +132,7 @@ func (r *partReviewer) ask(ctx context.Context, p part, maxTokens int) (partResu
 			SystemPrompt: sysPr,
 			UserPrompt:   repairPrompt,
 			MaxTokens:    maxTokens,
+			Effort:       r.cfg.ReasoningEffort,
 			Output:       findingsOutput,
 		})
 		res.llmMs += time.Since(start).Milliseconds()

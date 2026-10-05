@@ -26,10 +26,10 @@ Prism is run by AI coding agents (Claude Code, Codex), not by people at a termin
 | 13 | Function context around hunks | Accuracy | Medium | **Done** |
 | 14 | Compare mode on the full pipeline | Accuracy, Speed, Tokens | Medium | **Done** |
 | 15 | Severity floor in the prompt | Tokens, Speed | Medium | **Done** |
-| 16 | Low-temperature sampling | Accuracy | Medium | Not started |
+| 16 | ~~Low-temperature sampling~~ | Accuracy | — | **Dropped** (see #16) |
 | 17 | Language-specific system prompts | Accuracy | Medium | Not started |
 | 18 | Per-directory / per-language rules | Accuracy | Medium | Not started |
-| 19 | Reasoning effort control | Speed, Tokens | Medium | Not started |
+| 19 | Reasoning effort control | Speed, Tokens | Medium | **Done** |
 | 20 | Local JSON salvage before the repair call | Tokens, Speed | Medium | Not started |
 | 21 | Second-opinion check for blocking findings | Accuracy | Low | Not started |
 | 22 | Concurrent per-commit review | Speed | Low | Not started |
@@ -334,7 +334,15 @@ A deleted file has no post-image lines, so no finding on it can pass evidence ve
 
 ---
 
-### 16. Low-temperature sampling
+### 16. Low-temperature sampling (DROPPED)
+
+**Dropped:** most of the models agents run reject or advise against a lowered temperature.
+- **Anthropic:** sampling parameters return a 400 on Fable 5/5.1, Opus 5.5/5/4.8/4.7 and Sonnet 5. Sonnet 5.5 accepts only the default. Older models take a temperature only with thinking off.
+- **OpenAI:** reasoning models (the o-series and GPT-5 and later) reject a non-default temperature.
+- **Gemini 3:** Google recommends leaving it at 1.0 and warns that lower values can cause looping.
+- **Local reasoning models** (Qwen3 thinking, DeepSeek-R1, gpt-oss) recommend 0.6–1.0, and Ollama already applies each model's recommended setting from its Modelfile.
+
+The lever these models offer is reasoning effort (#19). Run-to-run consistency comes from structured output (#6), the caches (#1, #2), stable IDs (#4) and delta mode (#9). The original item follows for the record.
 
 **Problem:** The engine never sets `ReviewRequest.Temperature`, so providers leave it out and use their own default, which is usually 1.0. The Anthropic provider doesn't send a temperature at all. The same diff produces different findings on each run. The agent chases noise, fix loops take longer to settle, and baseline and delta matching (#4, #5, #9) get harder.
 
@@ -367,7 +375,16 @@ The glob matching already exists in `diffutil`. For each chunk, the prompt build
 
 ---
 
-### 19. Reasoning effort control
+### 19. Reasoning effort control (DONE)
+
+**Status:** Done.
+- **Setting:** `reasoningEffort` is set by config, `PRISM_REASONING_EFFORT`, `--reasoning-effort` or `pkg/prism` `ReasoningEffort`. It is one of `none`, `minimal`, `low`, `medium`, `high`, `xhigh` or `max`, and the default is unset (each model's own default).
+- **Per provider:** it's sent as Anthropic `output_config.effort` (next to the structured-output format, with thinking left at the model's default), OpenAI and Ollama `reasoning_effort`, and Gemini `thinkingConfig.thinkingLevel`.
+- **Refusals:** not every model takes every level, or effort at all.
+  - A 400/422 is asked again without the effort (keeping structured output), then without the schema alone, then without both.
+  - Only the fields the successful request left out are not sent to that endpoint again (`sendOptional` in `providers/schema.go`), so a field is switched off only after every attempt that kept it was refused.
+- **Cache:** effort is part of the prompt fingerprint, so a review at one effort isn't replayed as one at another. Unset keeps the earlier keys.
+- **Not covered:** per-path effort waits on #18. Raw temperature is not sent (#16).
 
 **Problem:** Reasoning models (GPT-5 and the o-series, Gemini thinking models, Claude with extended thinking) spend hidden tokens before they answer. Prism doesn't set an effort level, so it gets each provider's default. That can mean tens of seconds and thousands of reasoning tokens for a 20-line docs chunk.
 

@@ -25,6 +25,7 @@ func resetFlags() {
 	flagOut = ""
 	flagFailOn = ""
 	flagMinSeverity = ""
+	flagReasoningEffort = ""
 	flagMaxFindings = 0
 	flagRules = ""
 	flagBaseline = ""
@@ -96,6 +97,7 @@ func TestBuildOverrides_AllFlags(t *testing.T) {
 	flagFormat = "json"
 	flagFailOn = "high"
 	flagMinSeverity = "medium"
+	flagReasoningEffort = "low"
 	flagMaxFindings = 10
 	flagContextLines = 5
 	flagMaxDiffBytes = 1000
@@ -105,16 +107,17 @@ func TestBuildOverrides_AllFlags(t *testing.T) {
 	m := buildOverrides()
 
 	expected := map[string]string{
-		"provider":     "openai",
-		"model":        "gpt-4o",
-		"format":       "json",
-		"failOn":       "high",
-		"minSeverity":  "medium",
-		"maxFindings":  "10",
-		"contextLines": "5",
-		"maxDiffBytes": "1000",
-		"rulesFile":    "rules.yaml",
-		"compare":      "anthropic:claude,openai:gpt-4o",
+		"provider":        "openai",
+		"model":           "gpt-4o",
+		"format":          "json",
+		"failOn":          "high",
+		"minSeverity":     "medium",
+		"reasoningEffort": "low",
+		"maxFindings":     "10",
+		"contextLines":    "5",
+		"maxDiffBytes":    "1000",
+		"rulesFile":       "rules.yaml",
+		"compare":         "anthropic:claude,openai:gpt-4o",
 	}
 
 	if len(m) != len(expected) {

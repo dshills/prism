@@ -21,6 +21,7 @@ type Ollama struct {
 	baseURL string
 	client  *http.Client
 	schema  schemaSupport
+	effort  effortSupport
 }
 
 // NewOllama creates a new Ollama provider. No API key is required by default.
@@ -49,21 +50,16 @@ func NewOllama(model string) (*Ollama, error) {
 func (o *Ollama) Name() string { return "ollama" }
 
 func (o *Ollama) Review(ctx context.Context, req ReviewRequest) (ReviewResponse, error) {
-	structured := o.schema.use(req.Output)
-	resp, err := o.review(ctx, req, structured)
-	if structured && refusedSchema(err) {
-		// The endpoint does not take response_format: ask again without it,
-		// and stop asking once that works.
-		if resp, err = o.review(ctx, req, false); err == nil {
-			o.schema.rejected.Store(true)
-		}
-	}
-	return resp, err
+	// A server without response_format or reasoning_effort refuses the
+	// field and is asked again without it.
+	return sendOptional(req, &o.schema, &o.effort, func(structured, withEffort bool) (ReviewResponse, error) {
+		return o.review(ctx, req, structured, withEffort)
+	})
 }
 
 // review sends one review request, asking for structured output when
-// structured is true.
-func (o *Ollama) review(ctx context.Context, req ReviewRequest, structured bool) (ReviewResponse, error) {
+// structured is true and setting the reasoning effort when withEffort is.
+func (o *Ollama) review(ctx context.Context, req ReviewRequest, structured, withEffort bool) (ReviewResponse, error) {
 	maxTokens := req.MaxTokens
 	if maxTokens == 0 {
 		maxTokens = 4096
@@ -84,6 +80,9 @@ func (o *Ollama) review(ctx context.Context, req ReviewRequest, structured bool)
 	}
 	if structured {
 		body.ResponseFormat = openaiFormat(req.Output)
+	}
+	if withEffort {
+		body.ReasoningEffort = req.Effort
 	}
 
 	payload, err := json.Marshal(body)

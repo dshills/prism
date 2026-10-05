@@ -19,6 +19,7 @@ type Gemini struct {
 	model  string
 	client *http.Client
 	schema schemaSupport
+	effort effortSupport
 }
 
 // NewGemini creates a new Gemini provider.
@@ -40,21 +41,16 @@ func NewGemini(model string) (*Gemini, error) {
 func (g *Gemini) Name() string { return "gemini" }
 
 func (g *Gemini) Review(ctx context.Context, req ReviewRequest) (ReviewResponse, error) {
-	structured := g.schema.use(req.Output)
-	resp, err := g.review(ctx, req, structured)
-	if structured && refusedSchema(err) {
-		// The model does not take a schema: ask again without one, and stop
-		// asking once that works.
-		if resp, err = g.review(ctx, req, false); err == nil {
-			g.schema.rejected.Store(true)
-		}
-	}
-	return resp, err
+	// A model without a response schema or a thinking level refuses the
+	// field and is asked again without it.
+	return sendOptional(req, &g.schema, &g.effort, func(structured, withEffort bool) (ReviewResponse, error) {
+		return g.review(ctx, req, structured, withEffort)
+	})
 }
 
 // review sends one review request, asking for structured output when
-// structured is true.
-func (g *Gemini) review(ctx context.Context, req ReviewRequest, structured bool) (ReviewResponse, error) {
+// structured is true and setting the thinking level when withEffort is.
+func (g *Gemini) review(ctx context.Context, req ReviewRequest, structured, withEffort bool) (ReviewResponse, error) {
 	url := fmt.Sprintf("%s/%s:generateContent", geminiAPIURL, g.model)
 
 	body := geminiRequest{
@@ -80,6 +76,9 @@ func (g *Gemini) review(ctx context.Context, req ReviewRequest, structured bool)
 	if structured {
 		body.GenerationConfig.ResponseMimeType = "application/json"
 		body.GenerationConfig.ResponseSchema = req.Output.Schema.geminiSchema()
+	}
+	if withEffort {
+		body.GenerationConfig.ThinkingConfig = &geminiThinkingConfig{ThinkingLevel: req.Effort}
 	}
 
 	payload, err := json.Marshal(body)
@@ -170,7 +169,14 @@ type geminiGenConfig struct {
 	Temperature      *float64 `json:"temperature,omitempty"`
 	ResponseMimeType string   `json:"responseMimeType,omitempty"`
 	// ResponseSchema constrains the JSON response (structured output).
-	ResponseSchema map[string]any `json:"responseSchema,omitempty"`
+	ResponseSchema map[string]any        `json:"responseSchema,omitempty"`
+	ThinkingConfig *geminiThinkingConfig `json:"thinkingConfig,omitempty"`
+}
+
+// geminiThinkingConfig sets how much a thinking model thinks. Models that
+// take a token budget instead (Gemini 2.5) refuse a level.
+type geminiThinkingConfig struct {
+	ThinkingLevel string `json:"thinkingLevel,omitempty"`
 }
 
 type geminiResponse struct {

@@ -95,12 +95,17 @@ func Run(ctx context.Context, diff gitctx.DiffResult, cfg config.Config) (*Repor
 // promptFingerprint hashes everything builder puts into a prompt besides the
 // reviewed text: the system prompt, and the user prompt rendered around an
 // empty diff. That covers maxFindings, failOn, the rules section and any
-// input a builder adds later. Every cache key includes it, so changing what
-// the model is asked is a cache miss, never a replay of a review that was
-// asked something else.
+// input a builder adds later. The reasoning effort is in it too: it is not
+// prompt text, but it changes the review the model gives. Every cache key
+// includes it, so changing what the model is asked is a cache miss, never a
+// replay of a review that was asked something else.
 func promptFingerprint(builder PromptBuilder, cfg config.Config, rules *Rules) string {
 	sys, user := builder("", nil, cfg, rules)
-	h := sha256.Sum256([]byte(sys + "\x00" + user))
+	key := sys + "\x00" + user
+	if cfg.ReasoningEffort != "" { // unset keeps the keys from before effort existed
+		key += "\x00effort=" + cfg.ReasoningEffort
+	}
+	h := sha256.Sum256([]byte(key))
 	return fmt.Sprintf("%x", h[:16])
 }
 

@@ -21,13 +21,19 @@ type Config struct {
 	// write anything below it, and anything below it is dropped. Empty or
 	// "none" reports every severity. Agents usually set it to FailOn, since
 	// findings below the gate cost output tokens and decide nothing.
-	MinSeverity  string   `json:"minSeverity,omitempty"`
-	MaxFindings  int      `json:"maxFindings"`
-	ContextLines int      `json:"contextLines"`
-	Include      []string `json:"include"`
-	Exclude      []string `json:"exclude"`
-	MaxDiffBytes int      `json:"maxDiffBytes"`
-	ChunkBytes   int      `json:"chunkBytes,omitempty"`
+	MinSeverity string `json:"minSeverity,omitempty"`
+	// ReasoningEffort is how hard a reasoning model thinks before it
+	// answers: none, minimal, low, medium, high, xhigh or max, each sent as
+	// the provider's own setting. Not every model takes every level; one a
+	// model refuses is dropped for that review. Empty leaves each model's
+	// default.
+	ReasoningEffort string   `json:"reasoningEffort,omitempty"`
+	MaxFindings     int      `json:"maxFindings"`
+	ContextLines    int      `json:"contextLines"`
+	Include         []string `json:"include"`
+	Exclude         []string `json:"exclude"`
+	MaxDiffBytes    int      `json:"maxDiffBytes"`
+	ChunkBytes      int      `json:"chunkBytes,omitempty"`
 	// VerifyFindings checks findings against the code before reporting them
 	// (evidence and Go compile claims). nil means the default, true; a pointer
 	// so an explicit false in a config file is distinguishable from unset.
@@ -184,8 +190,20 @@ func Load(overrides map[string]string) (Config, error) {
 	if err := checkSeverityLevel("minSeverity", cfg.MinSeverity); err != nil {
 		return Config{}, err
 	}
+	if err := checkEffort(cfg.ReasoningEffort); err != nil {
+		return Config{}, err
+	}
 
 	return cfg, nil
+}
+
+// checkEffort rejects a reasoning effort no provider has (empty is unset).
+func checkEffort(v string) error {
+	switch v {
+	case "", "none", "minimal", "low", "medium", "high", "xhigh", "max":
+		return nil
+	}
+	return fmt.Errorf("reasoningEffort must be none, minimal, low, medium, high, xhigh or max, got %q", v)
 }
 
 // checkSeverityLevel rejects a severity level that is not none, low, medium
@@ -216,6 +234,9 @@ func mergeFile(dst *Config, src Config) {
 	}
 	if src.MinSeverity != "" {
 		dst.MinSeverity = src.MinSeverity
+	}
+	if src.ReasoningEffort != "" {
+		dst.ReasoningEffort = src.ReasoningEffort
 	}
 	if src.MaxFindings > 0 {
 		dst.MaxFindings = src.MaxFindings
@@ -301,6 +322,9 @@ func mergeEnv(cfg *Config) error {
 	if v := os.Getenv("PRISM_MIN_SEVERITY"); v != "" {
 		cfg.MinSeverity = v
 	}
+	if v := os.Getenv("PRISM_REASONING_EFFORT"); v != "" {
+		cfg.ReasoningEffort = v
+	}
 	if v := os.Getenv("PRISM_MAX_FINDINGS"); v != "" {
 		n, err := strconv.Atoi(v)
 		if err != nil {
@@ -385,6 +409,9 @@ func mergeOverrides(cfg *Config, overrides map[string]string) {
 	if v, ok := overrides["minSeverity"]; ok && v != "" {
 		cfg.MinSeverity = v
 	}
+	if v, ok := overrides["reasoningEffort"]; ok && v != "" {
+		cfg.ReasoningEffort = v
+	}
 	if v, ok := overrides["maxFindings"]; ok && v != "" {
 		if n, err := strconv.Atoi(v); err == nil {
 			cfg.MaxFindings = n
@@ -450,6 +477,11 @@ func SetField(cfg *Config, key, value string) error {
 			return err
 		}
 		cfg.MinSeverity = value
+	case "reasoningEffort":
+		if err := checkEffort(value); err != nil {
+			return err
+		}
+		cfg.ReasoningEffort = value
 	case "maxFindings":
 		n, err := strconv.Atoi(value)
 		if err != nil {

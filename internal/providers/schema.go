@@ -107,6 +107,61 @@ func (s *schemaSupport) use(out *Output) bool {
 	return out != nil && out.Schema != nil && !s.rejected.Load()
 }
 
+// effortSupport remembers, for one provider, the reasoning effort its
+// endpoint rejected, as schemaSupport does for structured output. It is the
+// level that was refused, not effort as a whole: a model can take some
+// levels and not others.
+type effortSupport struct {
+	rejected atomic.Value // string
+}
+
+// use reports whether a request should carry effort.
+func (s *effortSupport) use(effort string) bool {
+	rejected, _ := s.rejected.Load().(string)
+	return effort != "" && effort != rejected
+}
+
+// sendOptional sends a request with the optional fields its endpoint has not
+// refused: structured output and a reasoning effort. A refusal (400 or 422)
+// is answered by asking again without them, one at a time: without the
+// effort, which costs the review least, then without the schema alone, then
+// without both. The fields the request that got through left out are not
+// sent to this endpoint again, so the other chunks of a review do not each
+// pay for a refused request first; a field is switched off only after every
+// attempt that kept it was refused.
+func sendOptional(req ReviewRequest, schema *schemaSupport, effort *effortSupport,
+	send func(structured, withEffort bool) (ReviewResponse, error)) (ReviewResponse, error) {
+	structured, withEffort := schema.use(req.Output), effort.use(req.Effort)
+	resp, err := send(structured, withEffort)
+	if !refusedSchema(err) {
+		return resp, err
+	}
+	type attempt struct{ structured, effort bool }
+	var tries []attempt
+	switch {
+	case structured && withEffort:
+		tries = []attempt{{true, false}, {false, true}, {false, false}}
+	case structured || withEffort:
+		tries = []attempt{{false, false}}
+	}
+	for _, a := range tries {
+		resp, err = send(a.structured, a.effort)
+		if err == nil {
+			if structured && !a.structured {
+				schema.rejected.Store(true)
+			}
+			if withEffort && !a.effort {
+				effort.rejected.Store(req.Effort)
+			}
+			return resp, nil
+		}
+		if !refusedSchema(err) {
+			return resp, err
+		}
+	}
+	return resp, err
+}
+
 // requestError is a 4xx response other than auth and rate limits: the
 // request itself was refused.
 type requestError struct {

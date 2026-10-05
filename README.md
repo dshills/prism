@@ -191,6 +191,7 @@ All review subcommands accept these flags:
 | `--out` | Output file path | stdout |
 | `--fail-on` | Fail threshold (`none`, `low`, `medium`, `high`) | `none` |
 | `--min-severity` | Lowest severity to report (`none`, `low`, `medium`, `high`). The model is told not to write anything below it, which saves output tokens, and anything below it is dropped. Agents usually set it to their `--fail-on` | `none` |
+| `--reasoning-effort` | How hard a reasoning model thinks before it answers (`none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`), sent as Anthropic `output_config.effort`, OpenAI/Ollama `reasoning_effort` or Gemini `thinkingLevel`. A level the model refuses is dropped for that review. Lower effort is faster and uses fewer tokens | model's default |
 | `--max-findings` | Maximum number of findings. A chunked review asks each chunk for twice its even share (at least 10), not the whole limit | `50` |
 | `--context-lines` | Context lines in diff | `3` |
 | `--max-diff-bytes` | Maximum diff size in bytes | `500000` |
@@ -259,6 +260,7 @@ Example `config.json`:
   "format": "text",
   "failOn": "none",
   "minSeverity": "none",
+  "reasoningEffort": "",
   "maxFindings": 50,
   "contextLines": 3,
   "include": ["**/*"],
@@ -293,6 +295,7 @@ Example `config.json`:
 | `PRISM_MODEL` | `model` |
 | `PRISM_FAIL_ON` | `failOn` |
 | `PRISM_MIN_SEVERITY` | `minSeverity` |
+| `PRISM_REASONING_EFFORT` | `reasoningEffort` |
 | `PRISM_FORMAT` | `format` |
 | `PRISM_MAX_FINDINGS` | `maxFindings` |
 | `PRISM_CONTEXT_LINES` | `contextLines` |

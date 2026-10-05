@@ -11,6 +11,12 @@ type ReviewRequest struct {
 	UserPrompt   string
 	MaxTokens    int
 	Temperature  float64
+	// Effort is how hard a reasoning model thinks before it answers:
+	// Anthropic output_config.effort, OpenAI and Ollama reasoning_effort,
+	// Gemini thinkingConfig.thinkingLevel. Empty leaves the model's default.
+	// An endpoint that refuses it is asked again without it (see
+	// sendOptional).
+	Effort string
 	// Output, when set, asks for a response matching its schema in the
 	// provider's structured-output mode (see Output).
 	Output *Output

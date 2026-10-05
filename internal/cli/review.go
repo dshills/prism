@@ -36,6 +36,7 @@ var (
 	flagOut               string
 	flagFailOn            string
 	flagMinSeverity       string
+	flagReasoningEffort   string
 	flagMaxFindings       int
 	flagRules             string
 	flagBaseline          string
@@ -62,6 +63,7 @@ func addReviewFlags(cmd *cobra.Command) {
 	cmd.Flags().StringVar(&flagFailOn, "fail-on", "", "Fail on severity threshold (none, low, medium, high)")
 	cmd.Flags().StringVar(&flagMinSeverity, "min-severity", "", "Lowest severity to report (none, low, medium, high); the model is told not to write anything below it")
 	cmd.Flags().IntVar(&flagMaxFindings, "max-findings", 0, "Maximum number of findings")
+	cmd.Flags().StringVar(&flagReasoningEffort, "reasoning-effort", "", "How hard a reasoning model thinks (none, minimal, low, medium, high, xhigh, max); default: the model's own")
 	cmd.Flags().StringVar(&flagRules, "rules", "", "Rules file path")
 	cmd.Flags().StringVar(&flagFallback, "fallback", "", "provider:model to review with when the primary provider fails (auth, retries exhausted, unreachable)")
 	cmd.Flags().StringVar(&flagBaseline, "baseline", "", "Baseline of accepted findings (default .prism-baseline.json at the repo root; \"none\" to report them all)")
@@ -84,6 +86,9 @@ func buildOverrides() map[string]string {
 	}
 	if flagMinSeverity != "" {
 		m["minSeverity"] = flagMinSeverity
+	}
+	if flagReasoningEffort != "" {
+		m["reasoningEffort"] = flagReasoningEffort
 	}
 	if flagMaxFindings > 0 {
 		m["maxFindings"] = fmt.Sprintf("%d", flagMaxFindings)

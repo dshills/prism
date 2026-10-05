@@ -22,6 +22,7 @@ type Anthropic struct {
 	model  string
 	client *http.Client
 	schema schemaSupport
+	effort effortSupport
 }
 
 // NewAnthropic creates a new Anthropic provider.
@@ -40,21 +41,16 @@ func NewAnthropic(model string) (*Anthropic, error) {
 func (a *Anthropic) Name() string { return "anthropic" }
 
 func (a *Anthropic) Review(ctx context.Context, req ReviewRequest) (ReviewResponse, error) {
-	structured := a.schema.use(req.Output)
-	resp, err := a.review(ctx, req, structured)
-	if structured && refusedSchema(err) {
-		// The model does not take a schema: ask again without one, and stop
-		// asking once that works.
-		if resp, err = a.review(ctx, req, false); err == nil {
-			a.schema.rejected.Store(true)
-		}
-	}
-	return resp, err
+	// A model without structured outputs or effort refuses them, and is
+	// asked again without.
+	return sendOptional(req, &a.schema, &a.effort, func(structured, withEffort bool) (ReviewResponse, error) {
+		return a.review(ctx, req, structured, withEffort)
+	})
 }
 
 // review sends one review request, asking for structured output when
-// structured is true.
-func (a *Anthropic) review(ctx context.Context, req ReviewRequest, structured bool) (ReviewResponse, error) {
+// structured is true and setting the effort when withEffort is.
+func (a *Anthropic) review(ctx context.Context, req ReviewRequest, structured, withEffort bool) (ReviewResponse, error) {
 	maxTokens := req.MaxTokens
 	if maxTokens == 0 {
 		maxTokens = 4096
@@ -76,6 +72,15 @@ func (a *Anthropic) review(ctx context.Context, req ReviewRequest, structured bo
 		body.OutputConfig = &anthropicOutputConfig{
 			Format: &anthropicFormat{Type: "json_schema", Schema: req.Output.Schema.jsonSchema(true)},
 		}
+	}
+	if withEffort {
+		// Effort sets how much the model thinks, on the models that think
+		// by default and the ones that do not alike; thinking itself is left
+		// to the model's default.
+		if body.OutputConfig == nil {
+			body.OutputConfig = &anthropicOutputConfig{}
+		}
+		body.OutputConfig.Effort = req.Effort
 	}
 
 	payload, err := json.Marshal(body)
@@ -155,6 +160,7 @@ type anthropicRequest struct {
 
 type anthropicOutputConfig struct {
 	Format *anthropicFormat `json:"format,omitempty"`
+	Effort string           `json:"effort,omitempty"`
 }
 
 // anthropicFormat is a structured-output response format.

@@ -614,3 +614,25 @@ func TestMinSeverity(t *testing.T) {
 		t.Errorf("SetField urgent: %q, %v; want an error and no change", c.MinSeverity, err)
 	}
 }
+
+// reasoningEffort: environment, override and config key, each checked.
+func TestReasoningEffort(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("PRISM_REASONING_EFFORT", "minimal")
+	if cfg, err := Load(nil); err != nil || cfg.ReasoningEffort != "minimal" {
+		t.Errorf("environment: %q, %v", cfg.ReasoningEffort, err)
+	}
+	if cfg, _ := Load(map[string]string{"reasoningEffort": "xhigh"}); cfg.ReasoningEffort != "xhigh" {
+		t.Errorf("override: %q, want xhigh", cfg.ReasoningEffort)
+	}
+	if _, err := Load(map[string]string{"reasoningEffort": "extreme"}); err == nil {
+		t.Error("override extreme: no error")
+	}
+	var c Config
+	if err := SetField(&c, "reasoningEffort", "max"); err != nil || c.ReasoningEffort != "max" {
+		t.Errorf("SetField max: %q, %v", c.ReasoningEffort, err)
+	}
+	if err := SetField(&c, "reasoningEffort", "LOW"); err == nil {
+		t.Error("SetField LOW: no error")
+	}
+}
