@@ -387,6 +387,21 @@ prism review range origin/main..HEAD --since base.sarif --only-new
 
 Each finding is marked `new` or `persisting` (`delta` in JSON, `[new]` in text, SARIF `baselineState`). The report's `delta` summary counts them and lists what was **resolved**. An earlier finding in a file this review didn't cover is counted as out of scope, not resolved, and a finding accepted in the meantime is neither. An incomplete review (a failed chunk, a truncated diff) counts nothing as resolved, because a missing finding may only have gone unreviewed. With `--only-new`, only new findings are reported and decide the exit code. `last` with no previous review counts every finding as new, so a loop can use it from the first run, and the remembered last review is always the full one.
 
+## GitHub Pull Requests
+
+`prism github <pr>` fetches a pull request's diff, reviews it, and posts the findings as a PR review. It needs `GITHUB_TOKEN`, and the owner and repository come from the git remote unless `--owner` and `--repo` are given.
+
+To check findings before they reach the PR, review without posting, then post only the ones you confirmed:
+
+```bash
+prism github 42 --dry-run --format json --out prism.json
+prism github post-comments --pr 42 --report prism.json --ids <id>,<id>
+```
+
+- **Report:** `--report` takes a prism JSON report or a SARIF log prism wrote. `--ids` posts only the given findings, and `--skip-ids` leaves some out. An ID the report doesn't have is an error.
+- **Placement:** a finding is posted inline when its line is in the PR's current diff, and goes in the review's summary otherwise, since GitHub refuses a whole review over one misplaced comment. `prism github` places findings the same way. Suppressed findings are never posted.
+- **Dry run:** `--dry-run` prints the review instead of posting it.
+
 ## Rules Packs
 
 Create a rules file to customize review behavior:

@@ -43,6 +43,7 @@ func resetFlags() {
 	flagGHOwner = ""
 	flagGHRepo = ""
 	flagGHDryRun = false
+	flagPostPR, flagPostReport, flagPostIDs, flagPostSkip = 0, "", "", ""
 }
 
 // --- splitComma tests ---

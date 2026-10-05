@@ -57,7 +57,11 @@ func ReadPriorReview(data []byte) (*PriorReview, error) {
 	}
 	switch {
 	case probe.Runs != nil:
-		return readPriorSARIF(data)
+		prior, onlyNew, err := readSARIF(data)
+		if err == nil && onlyNew {
+			return nil, errOnlyNewBaseline
+		}
+		return prior, err
 	case probe.Tool == "prism":
 		var r Report
 		if err := json.Unmarshal(data, &r); err != nil {
@@ -86,7 +90,38 @@ var errOnlyNewBaseline = errors.New("reading earlier review: it was written with
 // the fingerprint scheme does.
 const SARIFFingerprintKey = "prismFindingId/v1"
 
-func readPriorSARIF(data []byte) (*PriorReview, error) {
+// ReportFindings is the findings a prism JSON report or SARIF log reported,
+// the suppressed ones left out. A report written with --only-new is read
+// like any other: what it reported is what it has.
+func ReportFindings(data []byte) ([]Finding, error) {
+	var probe struct {
+		Runs json.RawMessage `json:"runs"`
+		Tool string          `json:"tool"`
+	}
+	if err := json.Unmarshal(data, &probe); err != nil {
+		return nil, fmt.Errorf("reading report: %w", err)
+	}
+	switch {
+	case probe.Runs != nil:
+		prior, _, err := readSARIF(data)
+		if err != nil {
+			return nil, err
+		}
+		return prior.Findings, nil
+	case probe.Tool == "prism":
+		var r Report
+		if err := json.Unmarshal(data, &r); err != nil {
+			return nil, fmt.Errorf("reading report: %w", err)
+		}
+		return r.Findings, nil
+	default:
+		return nil, errors.New("reading report: not a prism JSON report or SARIF log")
+	}
+}
+
+// readSARIF reads the findings of a SARIF log's prism runs, and whether
+// one was written with --only-new.
+func readSARIF(data []byte) (prior *PriorReview, onlyNew bool, err error) {
 	var log struct {
 		Runs []struct {
 			Properties struct {
@@ -127,9 +162,9 @@ func readPriorSARIF(data []byte) (*PriorReview, error) {
 		} `json:"runs"`
 	}
 	if err := json.Unmarshal(data, &log); err != nil {
-		return nil, fmt.Errorf("reading earlier SARIF: %w", err)
+		return nil, false, fmt.Errorf("reading SARIF: %w", err)
 	}
-	prior := &PriorReview{}
+	prior = &PriorReview{}
 	fromPrism := false
 	for _, run := range log.Runs {
 		if run.Tool.Driver.Name != "prism" {
@@ -137,7 +172,7 @@ func readPriorSARIF(data []byte) (*PriorReview, error) {
 		}
 		fromPrism = true
 		if d := run.Properties.Delta; d != nil && d.OnlyNew {
-			return nil, errOnlyNewBaseline
+			onlyNew = true
 		}
 		type rule struct{ name, title string }
 		rules := map[string]rule{}
@@ -170,9 +205,9 @@ func readPriorSARIF(data []byte) (*PriorReview, error) {
 		}
 	}
 	if !fromPrism {
-		return nil, errors.New("reading earlier SARIF: no run written by prism")
+		return nil, false, errors.New("reading SARIF: no run written by prism")
 	}
-	return prior, nil
+	return prior, onlyNew, nil
 }
 
 // severityFromSARIF reverses the SARIF writer's severity-to-level mapping.

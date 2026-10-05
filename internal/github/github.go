@@ -10,9 +10,11 @@ import (
 	"os"
 	"os/exec"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
+	"github.com/dshills/prism/internal/diffutil"
 	"github.com/dshills/prism/internal/review"
 )
 
@@ -175,10 +177,60 @@ func (c *Client) PostReview(ctx context.Context, owner, repo string, prNumber in
 	return nil
 }
 
+// CommentableLines is the lines a review comment can be placed on, by file:
+// the new side's lines a pull request diff shows, added or context. GitHub
+// refuses a whole review when one of its comments is on any other line.
+func CommentableLines(diff string) map[string]map[int]bool {
+	out := map[string]map[int]bool{}
+	for _, section := range diffutil.SplitSections(diff) {
+		path := diffutil.PathFromSection(section)
+		if path == "" {
+			continue
+		}
+		lines := out[path]
+		if lines == nil {
+			lines = map[int]bool{}
+			out[path] = lines
+		}
+		cur := 0
+		for _, l := range strings.Split(section, "\n") {
+			switch {
+			case strings.HasPrefix(l, "diff --git "):
+				cur = 0
+			case strings.HasPrefix(l, "@@ "):
+				cur = 0
+				if _, after, ok := strings.Cut(l, " +"); ok {
+					n, _, _ := strings.Cut(after, ",")
+					n, _, _ = strings.Cut(n, " ")
+					cur, _ = strconv.Atoi(n)
+				}
+			case cur > 0 && (strings.HasPrefix(l, "+") || strings.HasPrefix(l, " ")):
+				lines[cur] = true
+				cur++
+			}
+		}
+	}
+	return out
+}
+
 // BuildGitHubReview converts review findings into a GitHub PR review request.
 // diffFiles is the set of files in the PR diff. Findings for files not in the diff
 // are included in the summary body only.
 func BuildGitHubReview(findings []review.Finding, diffFiles map[string]bool) ReviewRequest {
+	return buildReview(findings, func(path string, line int) bool { return diffFiles[path] })
+}
+
+// BuildGitHubReviewForDiff is BuildGitHubReview placing inline only the
+// findings on a line the pull request's diff shows (CommentableLines); the
+// rest go in the summary.
+func BuildGitHubReviewForDiff(findings []review.Finding, diff string) ReviewRequest {
+	lines := CommentableLines(diff)
+	return buildReview(findings, func(path string, line int) bool { return lines[path][line] })
+}
+
+// buildReview builds the review, placing a finding inline when inline
+// allows its path and line.
+func buildReview(findings []review.Finding, inline func(path string, line int) bool) ReviewRequest {
 	var high, medium, low int
 	var bodyComments []string
 	var comments []ReviewComment
@@ -194,14 +246,14 @@ func BuildGitHubReview(findings []review.Finding, diffFiles map[string]bool) Rev
 		}
 
 		// Check if finding has a valid location in the diff
-		if len(f.Locations) > 0 && f.Locations[0].Path != "" && diffFiles[f.Locations[0].Path] {
+		if len(f.Locations) > 0 && f.Locations[0].Path != "" {
 			loc := f.Locations[0]
 			line := loc.Lines.End
-			if line == 0 {
+			if line == 0 || !inline(loc.Path, line) {
 				line = loc.Lines.Start
 			}
-			if line == 0 {
-				// No line info — include in body
+			if line == 0 || !inline(loc.Path, line) {
+				// No line, or not one the diff shows — include in body
 				bodyComments = append(bodyComments, formatFindingBody(f))
 				continue
 			}

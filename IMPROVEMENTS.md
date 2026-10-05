@@ -35,7 +35,7 @@ Prism is run by AI coding agents (Claude Code, Codex), not by people at a termin
 | 22 | Concurrent per-commit review | Speed | Low | **Done** |
 | 23 | Trim repeated per-chunk prompt overhead | Tokens | Low | **Done** |
 | 24 | Confidence calibration | Accuracy | Low | **Done** |
-| 25 | `prism github post-comments` | Workflow | Low | Not started |
+| 25 | `prism github post-comments` | Workflow | Low | **Done** |
 | — | Per-file incremental cache invalidation | Speed, Tokens | — | **Done** (f844f11) |
 
 ---
@@ -500,7 +500,16 @@ The glob matching already exists in `diffutil`. For each chunk, the prompt build
 
 ---
 
-### 25. `prism github post-comments` subcommand
+### 25. `prism github post-comments` subcommand (DONE)
+
+**Status:** Done.
+- **Usage:** `prism github post-comments --pr N --report FILE [--ids a,b] [--skip-ids c] [--owner --repo] [--dry-run]`.
+- **Reading the report:** `review.ReportFindings` reads a prism JSON report or a SARIF log prism wrote, with the suppressed findings left out. A `--only-new` report is fine to post.
+  - The SARIF reading is shared with delta mode's reader, which still refuses an `--only-new` report as an earlier review.
+- **Selecting findings:** an ID in `--ids`/`--skip-ids` that the report lacks is a usage error, so a typo can't post or hide the wrong finding.
+- **Posting:** a finding goes inline only when its line is in the PR's current diff (`github.CommentableLines`: the new side's added and context lines), and in the summary otherwise, since GitHub refuses a whole review over one comment elsewhere.
+  - `prism github` now places findings the same way. It used to check only that the file was in the PR.
+  - `--dry-run` prints the review JSON, and owner/repo detection is shared with `prism github`.
 
 **Problem:** `prism github <pr>` fetches, reviews and posts in one step. An agent can't check the findings and drop false positives before they appear on the PR.
 
@@ -510,14 +519,7 @@ The glob matching already exists in `diffutil`. For each chunk, the prompt build
 
 ## ⚡ Quick Wins
 
-| Item | Effort | Notes |
-|------|--------|-------|
-| Low-temperature sampling (#16) | ~1 hr | `Temperature` is already plumbed through three of the four providers |
-| Severity floor in the prompt (#15) | ~1 hr | One prompt line plus a post-parse filter |
-| Function context option (#13) | ~1 hr | Pass `-W` to `git diff` |
-| Token counts in JSON output (#12) | ~1 hr | `TokensUsed` already populated per provider |
-| Skip lockfiles and generated files (#10) | ~2 hrs | Default excludes plus a header check |
-| `prism github post-comments` CLI entry point (#25) | ~3 hrs | Logic already exists in `github.go` |
+All done: #10, #12, #13, #15 and #25 are implemented, and #16 (low-temperature sampling) was dropped.
 
 ---
 

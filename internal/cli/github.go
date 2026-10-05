@@ -39,21 +39,11 @@ var githubCmd = &cobra.Command{
 			return err
 		}
 
-		// Detect owner/repo if not provided
-		owner, repo := flagGHOwner, flagGHRepo
-		if owner == "" || repo == "" {
-			detected, detectedRepo, err := github.DetectRepo()
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "Error: %v\nUse --owner and --repo flags to specify manually.\n", err)
-				exitCode = ExitRuntimeError
-				return nil
-			}
-			if owner == "" {
-				owner = detected
-			}
-			if repo == "" {
-				repo = detectedRepo
-			}
+		owner, repo, err := resolveGitHubRepo()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\nUse --owner and --repo flags to specify manually.\n", err)
+			exitCode = ExitRuntimeError
+			return nil
 		}
 
 		// Create GitHub client
@@ -129,12 +119,9 @@ var githubCmd = &cobra.Command{
 		if flagGHDryRun {
 			fmt.Fprintf(os.Stderr, "Dry run: %d findings found, not posting to GitHub.\n", len(report.Findings))
 		} else {
-			diffFileSet := make(map[string]bool, len(files))
-			for _, f := range files {
-				diffFileSet[f] = true
-			}
-
-			ghReview := github.BuildGitHubReview(report.Findings, diffFileSet)
+			// Inline only on lines the diff shows: GitHub refuses a whole
+			// review over one comment elsewhere.
+			ghReview := github.BuildGitHubReviewForDiff(report.Findings, diff)
 			fmt.Fprintf(os.Stderr, "Posting review (%d inline comments)...\n", len(ghReview.Comments))
 
 			if err := ghClient.PostReview(ctx, owner, repo, prNumber, ghReview); err != nil {

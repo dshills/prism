@@ -266,3 +266,29 @@ func TestBuildGitHubReview(t *testing.T) {
 		t.Errorf("Summary should mention severity counts, got: %s", rev.Body)
 	}
 }
+
+func TestCommentableLines(t *testing.T) {
+	diff := "diff --git a/a.go b/a.go\n--- a/a.go\n+++ b/a.go\n@@ -10,3 +20,4 @@ func f() {\n ctx\n-old\n+new\n+++ added\n ctx2\n" +
+		"diff --git a/b.go b/b.go\n--- a/b.go\n+++ b/b.go\n@@ -1 +1 @@\n-a\n+b\n"
+	got := CommentableLines(diff)
+	for _, line := range []int{20, 21, 22, 23} {
+		if !got["a.go"][line] {
+			t.Errorf("a.go line %d not commentable", line)
+		}
+	}
+	if got["a.go"][19] || got["a.go"][24] || !got["b.go"][1] || len(got["b.go"]) != 1 {
+		t.Errorf("lines = %v", got)
+	}
+}
+
+// A finding on a line the diff does not show goes in the summary.
+func TestBuildGitHubReviewForDiff(t *testing.T) {
+	diff := "diff --git a/a.go b/a.go\n--- a/a.go\n+++ b/a.go\n@@ -1,2 +1,2 @@\n x\n+y\n"
+	at := func(line int) review.Finding {
+		return review.Finding{Title: "t", Severity: review.SeverityHigh, Locations: []review.Location{{Path: "a.go", Lines: review.LineRange{Start: line, End: line}}}}
+	}
+	r := BuildGitHubReviewForDiff([]review.Finding{at(2), at(40)}, diff)
+	if len(r.Comments) != 1 || r.Comments[0].Line != 2 || !strings.Contains(r.Body, "General Findings") {
+		t.Errorf("review = %+v", r)
+	}
+}
