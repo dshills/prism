@@ -594,7 +594,7 @@ func runCodebaseReview(ctx context.Context, diff gitctx.DiffResult, cfg config.C
 	if len(compareModels) >= 2 {
 		maxPerFile := flagMaxFindingsPerFile
 		codebaseBuilder := func(chunkDiff string, files []string, c config.Config, r *review.Rules) (string, string) {
-			return review.CodebaseSystemPrompt(), review.BuildCodebaseUserPrompt(chunkDiff, files, c.MaxFindings, maxPerFile, c.FailOn, c.MinSeverity, r)
+			return review.CodebaseSystemPromptFor(files), review.BuildCodebaseUserPrompt(chunkDiff, files, c.MaxFindings, maxPerFile, c.FailOn, c.MinSeverity, r)
 		}
 		report, err = runCompareMode(ctx, diff, cfg, compareModels, codebaseBuilder)
 	} else {

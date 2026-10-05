@@ -54,7 +54,7 @@ func TestReasoningEffort_SentAndKeyed(t *testing.T) {
 func TestReasoningEffort_UnsetKeepsFingerprint(t *testing.T) {
 	cfg := config.Default()
 	base := promptFingerprint(defaultPromptBuilder, cfg, nil)
-	sys, user := defaultPromptBuilder("", nil, cfg, nil)
+	sys, user := defaultPromptBuilder("", guideProbeFiles(), cfg, nil)
 	if base != fingerprintOf(sys, user) {
 		t.Error("unset effort changed the prompt fingerprint")
 	}

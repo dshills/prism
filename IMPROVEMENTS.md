@@ -27,7 +27,7 @@ Prism is run by AI coding agents (Claude Code, Codex), not by people at a termin
 | 14 | Compare mode on the full pipeline | Accuracy, Speed, Tokens | Medium | **Done** |
 | 15 | Severity floor in the prompt | Tokens, Speed | Medium | **Done** |
 | 16 | ~~Low-temperature sampling~~ | Accuracy | — | **Dropped** (see #16) |
-| 17 | Language-specific system prompts | Accuracy | Medium | Not started |
+| 17 | Language-specific system prompts | Accuracy | Medium | **Done** |
 | 18 | Per-directory / per-language rules | Accuracy | Medium | Not started |
 | 19 | Reasoning effort control | Speed, Tokens | Medium | **Done** |
 | 20 | Local JSON salvage before the repair call | Tokens, Speed | Medium | Not started |
@@ -350,7 +350,12 @@ The lever these models offer is reasoning effort (#19). Run-to-run consistency c
 
 ---
 
-### 17. Language-specific system prompts
+### 17. Language-specific system prompts (DONE)
+
+**Status:** Done.
+- **Guidance:** `internal/review/langguide.go` has guidance for Go, Python, JavaScript/TypeScript, Rust, Java, C/C++, Shell and SQL. Each covers the mistakes a generic review misses in that language, plus a "do not report" list of that language's common false positives (for example unchecked `bytes.Buffer` writes, and style a linter or formatter enforces). The Go guidance also explains when a captured loop variable is shared (before Go 1.22, or a variable declared outside the loop) and when it isn't.
+- **Use:** `SystemPromptFor` / `CodebaseSystemPromptFor` add a section for each language among a chunk's files, in a fixed order, so the same languages always give the same prompt. Diff, codebase and compare reviews all use them.
+- **Cache:** the prompt fingerprint renders the prompt for one file of each guided language, so a change to any guidance is a cache miss.
 
 **Problem:** The system prompt is the same for every language. It misses Go-specific idioms (error wrapping, `defer` ordering, interface satisfaction), Python async pitfalls, TypeScript type narrowing, Rust lifetimes and so on. That means more generic findings and more false positives, and an agent spends a fix cycle on each false positive.
 

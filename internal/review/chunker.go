@@ -173,7 +173,7 @@ type ChunkOptions struct {
 
 // defaultPromptBuilder uses the standard diff-review prompts.
 func defaultPromptBuilder(chunkDiff string, files []string, cfg config.Config, rules *Rules) (string, string) {
-	return SystemPrompt(), buildUserPrompt(chunkDiff, files, cfg.MaxFindings, cfg.FailOn, cfg.MinSeverity, rules)
+	return SystemPromptFor(files), buildUserPrompt(chunkDiff, files, cfg.MaxFindings, cfg.FailOn, cfg.MinSeverity, rules)
 }
 
 // RunChunked reviews diff chunks in parallel and merges findings.

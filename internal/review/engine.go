@@ -94,13 +94,14 @@ func Run(ctx context.Context, diff gitctx.DiffResult, cfg config.Config) (*Repor
 
 // promptFingerprint hashes everything builder puts into a prompt besides the
 // reviewed text: the system prompt, and the user prompt rendered around an
-// empty diff. That covers maxFindings, failOn, the rules section and any
-// input a builder adds later. The reasoning effort is in it too: it is not
+// empty diff of one file in each language with guidance (guideProbeFiles).
+// That covers maxFindings, failOn, the rules section, the language guidance
+// and any input a builder adds later. The reasoning effort is in it too: it is not
 // prompt text, but it changes the review the model gives. Every cache key
 // includes it, so changing what the model is asked is a cache miss, never a
 // replay of a review that was asked something else.
 func promptFingerprint(builder PromptBuilder, cfg config.Config, rules *Rules) string {
-	sys, user := builder("", nil, cfg, rules)
+	sys, user := builder("", guideProbeFiles(), cfg, rules)
 	key := sys + "\x00" + user
 	if cfg.ReasoningEffort != "" { // unset keeps the keys from before effort existed
 		key += "\x00effort=" + cfg.ReasoningEffort
@@ -540,7 +541,7 @@ func runCodebaseWithFileCache(
 
 	maxPerFile := cfg.MaxFindingsPerFile
 	codebaseBuilder := func(chunkDiff string, files []string, c config.Config, r *Rules) (string, string) {
-		return CodebaseSystemPrompt(), BuildCodebaseUserPrompt(chunkDiff, files, c.MaxFindings, maxPerFile, c.FailOn, c.MinSeverity, r)
+		return CodebaseSystemPromptFor(files), BuildCodebaseUserPrompt(chunkDiff, files, c.MaxFindings, maxPerFile, c.FailOn, c.MinSeverity, r)
 	}
 	prompt := promptFingerprint(codebaseBuilder, cfg.Config, rules)
 
