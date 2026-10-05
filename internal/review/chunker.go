@@ -200,8 +200,8 @@ func runChunkedCounted(ctx context.Context, chunks []Chunk, provider providers.R
 	if builder == nil {
 		builder = defaultPromptBuilder
 	}
-	perChunk, llmMs, calls, err := reviewChunks(ctx, chunks, nil, provider, cfg, rules, builder)
-	if err != nil {
+	perChunk, errs, llmMs, calls := reviewChunks(ctx, chunks, nil, provider, cfg, rules, builder)
+	if err := firstError(errs); err != nil {
 		return nil, llmMs, calls, err
 	}
 	return mergeChunkFindings(perChunk), llmMs, calls, nil
@@ -215,10 +215,9 @@ func runChunkedCounted(ctx context.Context, chunks []Chunk, provider providers.R
 // prompt is still built against the whole of chunks, so a chunk reviewed on
 // its own is told about the parts that were not.
 //
-// When a chunk fails, the first error in chunk order is returned together
-// with the findings of every chunk that succeeded, so the caller can keep
-// them.
-func reviewChunks(ctx context.Context, chunks []Chunk, todo []int, provider providers.Reviewer, cfg config.Config, rules *Rules, builder PromptBuilder) ([][]Finding, int64, int, error) {
+// errs holds each failed chunk's error by chunk index, so the caller can keep
+// the chunks that succeeded and report the ones that did not.
+func reviewChunks(ctx context.Context, chunks []Chunk, todo []int, provider providers.Reviewer, cfg config.Config, rules *Rules, builder PromptBuilder) (perChunk [][]Finding, errs []error, llmMs int64, calls int) {
 	if todo == nil {
 		todo = make([]int, len(chunks))
 		for i := range chunks {
@@ -237,12 +236,10 @@ func reviewChunks(ctx context.Context, chunks []Chunk, todo []int, provider prov
 	}
 	limiter := ratelimit.New(rpm)
 
-	perChunk := make([][]Finding, len(chunks))
-	errs := make([]error, len(chunks))
+	perChunk = make([][]Finding, len(chunks))
+	errs = make([]error, len(chunks))
 	var wg sync.WaitGroup
 	sem := make(chan struct{}, concurrency)
-	var totalLLMMs int64
-	var calls int
 	var mu sync.Mutex
 
 	for _, i := range todo {
@@ -253,7 +250,7 @@ func reviewChunks(ctx context.Context, chunks []Chunk, todo []int, provider prov
 			defer func() { <-sem }() // release
 
 			if err := limiter.Wait(ctx); err != nil {
-				errs[i] = fmt.Errorf("chunk %d: rate limiter: %w", i, err)
+				errs[i] = fmt.Errorf("rate limiter: %w", err)
 				return
 			}
 
@@ -270,12 +267,12 @@ func reviewChunks(ctx context.Context, chunks []Chunk, todo []int, provider prov
 			elapsed := time.Since(llmStart).Milliseconds()
 
 			mu.Lock()
-			totalLLMMs += elapsed
+			llmMs += elapsed
 			calls++
 			mu.Unlock()
 
 			if err != nil {
-				errs[i] = fmt.Errorf("chunk %d: %w", i, err)
+				errs[i] = err
 				return
 			}
 
@@ -295,12 +292,12 @@ func reviewChunks(ctx context.Context, chunks []Chunk, todo []int, provider prov
 				calls++
 				mu.Unlock()
 				if err2 != nil {
-					errs[i] = fmt.Errorf("chunk %d repair: %w", i, err2)
+					errs[i] = fmt.Errorf("repair: %w", err2)
 					return
 				}
 				findings, err = parseFindings(resp2.Content)
 				if err != nil {
-					errs[i] = fmt.Errorf("chunk %d validation after repair: %w", i, err)
+					errs[i] = fmt.Errorf("validation after repair: %w", err)
 					return
 				}
 				resp = resp2
@@ -311,13 +308,66 @@ func reviewChunks(ctx context.Context, chunks []Chunk, todo []int, provider prov
 	}
 
 	wg.Wait()
+	return perChunk, errs, llmMs, calls
+}
 
-	for _, err := range errs {
+// firstError is the first non-nil error in chunk order, labelled with its
+// chunk index.
+func firstError(errs []error) error {
+	for i, err := range errs {
 		if err != nil {
-			return perChunk, totalLLMMs, calls, err
+			return fmt.Errorf("chunk %d: %w", i, err)
 		}
 	}
-	return perChunk, totalLLMMs, calls, nil
+	return nil
+}
+
+// maxSkipFiles caps how many file names a failed chunk's skip entry lists.
+const maxSkipFiles = 5
+
+// chunkFailures turns the chunks that failed into coverage skips, so the
+// chunks that succeeded are kept and the report says what was not reviewed
+// (exit 5). It returns an error instead when there is nothing worth keeping:
+// a provider auth error, which fails every chunk alike, a cancelled context,
+// or no result at all (haveResults false: no chunk was cached or succeeded).
+func chunkFailures(ctx context.Context, chunks []Chunk, errs []error, haveResults bool) ([]Skip, error) {
+	first := firstError(errs)
+	if first == nil {
+		return nil, nil
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	for i, err := range errs {
+		if providers.IsAuthError(err) {
+			return nil, fmt.Errorf("chunk %d: %w", i, err)
+		}
+	}
+	if !haveResults {
+		return nil, first
+	}
+	var skips []Skip
+	for i, err := range errs {
+		if err != nil {
+			skips = append(skips, Skip{Target: chunkTarget(chunks, i), Reason: "review failed: " + err.Error()})
+		}
+	}
+	return skips, nil
+}
+
+// chunkTarget names a chunk in a skip entry by its position and files, which
+// are what an agent needs to know were not reviewed.
+func chunkTarget(chunks []Chunk, i int) string {
+	files := chunks[i].Files
+	shown := files
+	if len(shown) > maxSkipFiles {
+		shown = shown[:maxSkipFiles]
+	}
+	list := strings.Join(shown, ", ")
+	if extra := len(files) - len(shown); extra > 0 {
+		list += fmt.Sprintf(", and %d more", extra)
+	}
+	return fmt.Sprintf("chunk %d/%d (%s)", i+1, len(chunks), list)
 }
 
 // mergeChunkFindings joins per-chunk findings in chunk order, then

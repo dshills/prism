@@ -13,7 +13,7 @@ Prism is run by AI coding agents (Claude Code, Codex), not by people at a termin
 |---|------|----------|----------|--------|
 | 1 | Cache keys that cover every prompt input | Accuracy | High | **Done** |
 | 2 | Per-chunk caching for diff modes | Speed, Tokens | High | **Done** |
-| 3 | Keep partial results when a chunk fails | Speed, Tokens | High | Partial — succeeded chunks are cached |
+| 3 | Keep partial results when a chunk fails | Speed, Tokens | High | **Done** |
 | 4 | Stable finding fingerprints | Accuracy, Workflow | High | Not started |
 | 5 | Finding baseline / suppression | Workflow | High | Not started |
 | 6 | Native structured output | Accuracy, Tokens | High | Not started |
@@ -69,9 +69,13 @@ The limit: a diff that fits in one chunk (24 KB by default) is still cached as a
 
 ---
 
-### 3. Keep partial results when a chunk fails (PARTIAL)
+### 3. Keep partial results when a chunk fails (DONE)
 
-**Status:** Since #2, the chunks that succeeded are cached before the error is returned, so a rerun sends only the failed chunk. The review itself still fails, and `Retry-After` is still ignored.
+**Status:** Done.
+- **Retries:** providers honor `Retry-After` (seconds or an HTTP date) and `retry-after-ms` on 429 and 5xx, with up to 25% jitter so chunks given the same wait don't all return at once. A wait over 60s fails at once rather than stalling the review. Without a header, a 429 backs off from 2s and a 5xx from 1s.
+- **Partial results:** in diff and codebase modes, a chunk that still fails becomes a `coverage.skipped` entry (`chunk 2/5 (a.go, b.go)`). The other chunks' findings are reported and the run exits 5. An auth error, a cancelled context, or no result at all still fails the review.
+- **No false clean:** in codebase mode, a failed chunk's files are not cached as clean.
+- **Related fixes:** `IsAuthError` now sees through wrapped errors (an auth failure used to exit 4 instead of 3), and `prism github` now exits 5 for an incomplete review, as `review` does.
 
 **Problem:** `runChunkedCounted` returns an error as soon as any one chunk fails. That throws away the findings of every chunk that succeeded, whose tokens have already been paid for. Chunks often fail on 429s: `retryWithBackoff` retries 3 times at roughly 1s, 2s and 4s and ignores `Retry-After`, which a burst of 8 concurrent chunks easily outlasts. One rate-limited chunk fails the whole review, and the agent reruns it from scratch.
 
@@ -344,7 +348,6 @@ The glob matching already exists in `diffutil`. For each chunk, the prompt build
 | Function context option (#13) | ~1 hr | Pass `-W` to `git diff` |
 | Token counts in JSON output (#12) | ~1 hr | `TokensUsed` already populated per provider |
 | Skip lockfiles and generated files (#10) | ~2 hrs | Default excludes plus a header check |
-| Honor `Retry-After` and keep partial chunk results (#3) | ~2 hrs | Coverage, exit 5 and per-chunk results already exist |
 | `prism github post-comments` CLI entry point (#25) | ~3 hrs | Logic already exists in `github.go` |
 
 ---

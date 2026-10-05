@@ -16,8 +16,8 @@ const (
 	ExitUsageError   = 2
 	ExitAuthError    = 3
 	ExitRuntimeError = 4
-	// ExitIncomplete: the review did not cover its whole input (a commit
-	// skipped for an error, or a diff truncated at maxDiffBytes). See
+	// ExitIncomplete: the review did not cover its whole input (a commit or
+	// chunk skipped for an error, or a diff truncated at maxDiffBytes). See
 	// specs/SPEC-review-integrity.md FR-3.
 	ExitIncomplete = 5
 )

@@ -63,7 +63,7 @@ review path: single, chunked, compare, codebase, per-commit range, and
 | `cacheHit` | bool | All the findings were replayed from cache: no chunk was sent. |
 | `cachedChunks` | int | Of `chunks`, how many were replayed from cache instead of sent. Equals `chunks` when `cacheHit` is true. |
 | `truncatedBytes` | int | Bytes cut by `maxDiffBytes` (0 when not truncated). |
-| `skipped` | `[]{target, reason}` | Parts of the input not reviewed. For per-commit range, `target` is the short commit SHA. For truncation, `target` is `"diff"`. |
+| `skipped` | `[]{target, reason}` | Parts of the input not reviewed. For per-commit range, `target` is the short commit SHA. For truncation, `target` is `"diff"`. For a failed chunk, `target` is `"chunk 2/5 (a.go, b.go)"`: its position and up to five of its files. |
 | `complete` | bool | True when the whole input was reviewed: nothing skipped for an error, nothing truncated. |
 
 **Empty input.** An empty diff (nothing staged, a range with no changes after
@@ -75,6 +75,19 @@ nothing was missed.
 - A commit skipped because its diff is empty is **not** incomplete.
 - A commit skipped for a diff error, or a commit whose review failed, is added
   to `skipped` and makes the report incomplete.
+
+**Chunk failures.** In a chunked review (diff or codebase), a chunk whose
+review still fails after retries is added to `skipped`, with the provider's
+error as the reason. The other chunks' findings are kept and reported, and the
+report is incomplete. The chunks that succeeded are cached, so a rerun sends
+only the chunks that failed. The whole review still fails, with no report,
+when:
+- any chunk fails with an auth error (exit 3), since it applies to every chunk;
+- the context is cancelled;
+- no chunk produced a result, from a model or from cache.
+
+A review that is not chunked has only one part, so its failure fails the
+review as before.
 
 **Cache hits.** A cached result reports `cacheHit: true` and `llmCalls: 0`.
 `chunks` is the count the review would have used.

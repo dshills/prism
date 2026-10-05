@@ -136,16 +136,9 @@ var githubCmd = &cobra.Command{
 			fmt.Fprintf(os.Stderr, "Review posted to PR #%d.\n", prNumber)
 		}
 
-		// Check fail-on threshold
-		if cfg.FailOn != "none" && cfg.FailOn != "" {
-			for _, f := range report.Findings {
-				if review.MeetsThreshold(f.Severity, cfg.FailOn) {
-					exitCode = ExitFindings
-					return nil
-				}
-			}
-		}
-
+		// Fail-on threshold first, then exit 5 for a partial review (a
+		// truncated diff or a failed chunk), as review does (FR-3).
+		exitCode = finishExit(report, cfg.FailOn, flagAllowIncomplete)
 		return nil
 	},
 }

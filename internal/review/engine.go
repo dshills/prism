@@ -244,7 +244,8 @@ func reviewWholeCached(ctx context.Context, redactedDiff string, files []string,
 // chunk whose entry hits is replayed rather than sent; the rest are reviewed
 // together, their prompts still listing every other part's files. Each chunk
 // reviewed is stored even when another one failed, so a rerun sends only the
-// chunks that did not succeed.
+// chunks that did not succeed. A chunk that fails is a coverage skip, unless
+// chunkFailures finds the failure fatal.
 func reviewChunksCached(ctx context.Context, chunks []Chunk, cfg config.Config, rules *Rules, builder PromptBuilder, prompt string, rc *cache.Cache, cov *Coverage) ([]Finding, int64, error) {
 	keys := make([]string, len(chunks))
 	perChunk := make([][]Finding, len(chunks))
@@ -270,17 +271,21 @@ func reviewChunksCached(ctx context.Context, chunks []Chunk, cfg config.Config, 
 	if err != nil {
 		return nil, 0, fmt.Errorf("creating provider: %w", err)
 	}
-	fresh, llmMs, calls, err := reviewChunks(ctx, chunks, todo, provider, cfg, rules, builder)
+	fresh, errs, llmMs, calls := reviewChunks(ctx, chunks, todo, provider, cfg, rules, builder)
 	cov.LLMCalls = calls
+	haveResults := cov.CachedChunks > 0
 	for _, i := range todo {
-		if fresh[i] != nil { // nil: this chunk failed
+		if errs[i] == nil {
 			putFindings(rc, keys[i], fresh[i])
 			perChunk[i] = fresh[i]
+			haveResults = true
 		}
 	}
+	skips, err := chunkFailures(ctx, chunks, errs, haveResults)
 	if err != nil {
 		return nil, llmMs, fmt.Errorf("chunked review: %w", err)
 	}
+	cov.Skipped = append(cov.Skipped, skips...)
 	return mergeChunkFindings(perChunk), llmMs, nil
 }
 
@@ -504,14 +509,25 @@ func runCodebaseWithFileCache(
 
 		chunks := SplitIntoChunks(filteredDiff, cfg.ChunkBytes)
 		cov.Chunks = len(chunks)
-		var err2 error
-		freshFindings, llmMs, cov.LLMCalls, err2 = runChunkedCounted(ctx, chunks, provider, cfg.Config, rules, ChunkOptions{Builder: codebaseBuilder})
-		if err2 != nil {
-			return nil, fmt.Errorf("chunked review: %w", err2)
-		}
+		perChunk, errs, ms, calls := reviewChunks(ctx, chunks, nil, provider, cfg.Config, rules, codebaseBuilder)
+		llmMs, cov.LLMCalls = ms, calls
 
-		// Step 8: Store fresh findings per file for future cache hits (FR-4).
-		storeFindingsPerFile(reviewCache, uncachedSections, freshFindings, cfg.Provider, cfg.Model, prompt)
+		// Step 8: Store fresh findings per file for future cache hits (FR-4),
+		// only for the chunks that succeeded: a failed chunk's files must not
+		// be cached as clean.
+		haveResults := len(uncachedSections) < len(sections) // some files came from cache
+		for i, c := range chunks {
+			if errs[i] == nil {
+				storeFindingsPerFile(reviewCache, diffutil.SplitSections(c.Diff), perChunk[i], cfg.Provider, cfg.Model, prompt)
+				haveResults = true
+			}
+		}
+		skips, err := chunkFailures(ctx, chunks, errs, haveResults)
+		if err != nil {
+			return nil, fmt.Errorf("chunked review: %w", err)
+		}
+		cov.Skipped = append(cov.Skipped, skips...)
+		freshFindings = mergeChunkFindings(perChunk)
 	}
 
 	// Step 9: Merge cached and fresh findings.

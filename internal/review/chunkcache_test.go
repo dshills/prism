@@ -4,6 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"regexp"
 	"strings"
 	"sync"
@@ -24,13 +27,16 @@ type fileReviewer struct {
 
 var promptFile = regexp.MustCompile(`(?m)^\+\+\+ b/(\S+)$`)
 
-func (r *fileReviewer) Review(_ context.Context, req providers.ReviewRequest) (providers.ReviewResponse, error) {
+func (r *fileReviewer) Review(ctx context.Context, req providers.ReviewRequest) (providers.ReviewResponse, error) {
+	if err := ctx.Err(); err != nil {
+		return providers.ReviewResponse{}, err // as a real provider's HTTP call would
+	}
 	r.mu.Lock()
 	r.prompts = append(r.prompts, req.UserPrompt)
 	failOn := r.failOn
 	r.mu.Unlock()
 
-	diff, _, _ := strings.Cut(req.UserPrompt, "--- END DIFF ---")
+	diff, _, _ := strings.Cut(req.UserPrompt, "\n--- END ") // diff or source files, not the other-parts note
 	if failOn != "" && strings.Contains(diff, failOn) {
 		return providers.ReviewResponse{}, errors.New("provider unavailable")
 	}
@@ -150,23 +156,35 @@ func TestRun_ChunkCacheReviewsOnlyChangedChunks(t *testing.T) {
 	}
 }
 
-// When one chunk fails, the chunks that succeeded are cached, so a rerun sends
-// only the one that failed.
-func TestRun_ChunkCacheKeepsSucceededChunksOnFailure(t *testing.T) {
+// A chunk that fails is a skip, not a failed review: the other chunks'
+// findings are reported, the report is incomplete (exit 5), and a rerun sends
+// only the failed chunk, since the ones that succeeded were cached.
+func TestRun_FailedChunkIsSkipped(t *testing.T) {
 	rev := &fileReviewer{failOn: "d2/b.go"}
 	useProvider(t, rev)
 	cfg := chunkTestConfig(t)
 	ctx := context.Background()
 
-	if _, err := Run(ctx, threeChunkDiff("beta"), cfg); err == nil {
-		t.Fatal("expected the failed chunk to fail the review")
+	report, err := Run(ctx, threeChunkDiff("beta"), cfg)
+	if err != nil {
+		t.Fatalf("one failed chunk should not fail the review: %v", err)
 	}
 	rev.calls()
+	if got := strings.Join(findingPaths(report), ","); got != "d1/a.go,d3/c.go" {
+		t.Errorf("findings = %s, want the two chunks that succeeded", got)
+	}
+	c := report.Coverage
+	if c.Complete || !c.Incomplete() || len(c.Skipped) != 1 {
+		t.Fatalf("coverage = %+v, want incomplete with one skip", c)
+	}
+	if s := c.Skipped[0]; s.Target != "chunk 2/3 (d2/b.go)" || !strings.Contains(s.Reason, "provider unavailable") {
+		t.Errorf("skip = %+v, want chunk 2/3 (d2/b.go) and the provider's error", s)
+	}
 
 	rev.mu.Lock()
 	rev.failOn = ""
 	rev.mu.Unlock()
-	report, err := Run(ctx, threeChunkDiff("beta"), cfg)
+	report, err = Run(ctx, threeChunkDiff("beta"), cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -174,8 +192,90 @@ func TestRun_ChunkCacheKeepsSucceededChunksOnFailure(t *testing.T) {
 	if len(prompts) != 1 || !strings.Contains(prompts[0], "+++ b/d2/b.go") {
 		t.Fatalf("rerun sent %d prompts, want only the chunk that failed", len(prompts))
 	}
-	if report.Coverage.CachedChunks != 2 || len(report.Findings) != 3 {
-		t.Errorf("rerun: %d cached chunks, %d findings; want 2 and 3", report.Coverage.CachedChunks, len(report.Findings))
+	if c := report.Coverage; !c.Complete || c.CachedChunks != 2 || len(report.Findings) != 3 {
+		t.Errorf("rerun: coverage %+v, %d findings; want complete, 2 cached, 3 findings", c, len(report.Findings))
+	}
+}
+
+// With no chunk reviewed at all there is nothing to keep, so the review fails.
+func TestRun_AllChunksFailedIsAnError(t *testing.T) {
+	useProvider(t, &fileReviewer{failOn: ".go"})
+	if _, err := Run(context.Background(), threeChunkDiff("beta"), chunkTestConfig(t)); err == nil {
+		t.Fatal("expected an error when every chunk failed")
+	}
+}
+
+// A cancelled review fails rather than reporting the chunks it never sent.
+func TestRun_CancelledChunkedReviewIsAnError(t *testing.T) {
+	useProvider(t, &fileReviewer{})
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := Run(ctx, threeChunkDiff("beta"), chunkTestConfig(t)); !errors.Is(err, context.Canceled) {
+		t.Fatalf("err = %v, want context.Canceled", err)
+	}
+}
+
+// An auth error fails every chunk alike, so it fails the review, and the
+// wrapped error is still recognised as one (exit 3, not 4).
+func TestRun_ChunkAuthErrorFailsReview(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		if strings.Contains(string(body), "+++ b/d2/b.go") { // d2/b.go's own chunk
+			w.WriteHeader(http.StatusUnauthorized)
+			_, _ = io.WriteString(w, `{"error":"bad key"}`)
+			return
+		}
+		_, _ = io.WriteString(w, `{"choices":[{"message":{"role":"assistant","content":"[]"}}]}`)
+	}))
+	defer srv.Close()
+	t.Setenv("OPENAI_API_KEY", "test-key")
+	t.Setenv("PRISM_OPENAI_BASE_URL", srv.URL)
+
+	cfg := chunkTestConfig(t)
+	cfg.Provider, cfg.Model = "openai", "gpt-4o"
+	cfg.RateLimitRPM = 6000
+	_, err := Run(context.Background(), threeChunkDiff("beta"), cfg)
+	if err == nil || !providers.IsAuthError(err) {
+		t.Fatalf("err = %v, want an auth error", err)
+	}
+}
+
+// A codebase chunk that fails must not leave its files cached as clean: they
+// are reviewed again on the next run.
+func TestRunCodebase_FailedChunkNotCachedAsClean(t *testing.T) {
+	rev := &fileReviewer{failOn: "d2/b.go"}
+	useProvider(t, rev)
+	cfg := CodebaseConfig{Config: chunkTestConfig(t)}
+	files := []string{"d1/a.go", "d2/b.go", "d3/c.go"}
+	diff := gitctx.DiffResult{
+		Diff:  makeSection(files[0], "package a") + makeSection(files[1], "package b") + makeSection(files[2], "package c"),
+		Files: files,
+		Mode:  "codebase",
+	}
+	ctx := context.Background()
+
+	report, err := RunCodebase(ctx, diff, cfg)
+	if err != nil {
+		t.Fatalf("one failed chunk should not fail the review: %v", err)
+	}
+	rev.calls()
+	if len(report.Coverage.Skipped) != 1 || len(report.Findings) != 2 {
+		t.Fatalf("got %d skips and %d findings, want 1 and 2", len(report.Coverage.Skipped), len(report.Findings))
+	}
+
+	rev.mu.Lock()
+	rev.failOn = ""
+	rev.mu.Unlock()
+	report, err = RunCodebase(ctx, diff, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	prompts := rev.calls()
+	if len(prompts) != 1 || !strings.Contains(prompts[0], "+++ b/d2/b.go") {
+		t.Fatalf("rerun sent %d prompts, want d2/b.go reviewed again", len(prompts))
+	}
+	if !report.Coverage.Complete || len(report.Findings) != 3 {
+		t.Errorf("rerun: complete=%v, %d findings; want complete with 3", report.Coverage.Complete, len(report.Findings))
 	}
 }
 

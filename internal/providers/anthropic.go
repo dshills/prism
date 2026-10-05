@@ -80,13 +80,13 @@ func (a *Anthropic) Review(ctx context.Context, req ReviewRequest) (ReviewRespon
 		}
 
 		if httpResp.StatusCode == 429 {
-			return &rateLimitError{}
+			return newRateLimitError(httpResp.Header)
 		}
 		if httpResp.StatusCode == 401 || httpResp.StatusCode == 403 {
 			return &authError{message: string(respBody)}
 		}
 		if httpResp.StatusCode >= 500 {
-			return &serverError{statusCode: httpResp.StatusCode, body: string(respBody)}
+			return newServerError(httpResp.StatusCode, httpResp.Header, string(respBody))
 		}
 		if httpResp.StatusCode != 200 {
 			return fmt.Errorf("API error (status %d): %s", httpResp.StatusCode, string(respBody))

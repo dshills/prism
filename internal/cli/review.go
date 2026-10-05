@@ -44,7 +44,7 @@ func addReviewFlags(cmd *cobra.Command) {
 	cmd.Flags().IntVar(&flagContextLines, "context-lines", 0, "Number of context lines in diff")
 	cmd.Flags().IntVar(&flagMaxDiffBytes, "max-diff-bytes", 0, "Maximum diff size in bytes")
 	cmd.Flags().IntVar(&flagChunkBytes, "chunk-bytes", 0, "Target size in bytes of each chunk a large diff is split into for review (default 24000)")
-	cmd.Flags().BoolVar(&flagAllowIncomplete, "allow-incomplete", false, "Exit 0 even when part of the input was not reviewed (truncated diff, skipped commit)")
+	cmd.Flags().BoolVar(&flagAllowIncomplete, "allow-incomplete", false, "Exit 0 even when part of the input was not reviewed (truncated diff, skipped commit or chunk)")
 	cmd.Flags().BoolVar(&flagNoVerifyFindings, "no-verify-findings", false, "Report findings without checking their quoted evidence or Go compile claims against the code")
 	cmd.Flags().StringVar(&flagProvider, "provider", "", "LLM provider (anthropic, openai, gemini)")
 	cmd.Flags().StringVar(&flagModel, "model", "", "Model name")
