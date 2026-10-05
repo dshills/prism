@@ -94,6 +94,10 @@ type Finding struct {
 	Provider string `json:"provider,omitempty"`
 	// Model is the concrete model that produced this finding.
 	Model string `json:"model,omitempty"`
+	// Calibration is how often findings like this were confirmed when an
+	// agent judged them (prism findings confirm/dismiss); nil until there
+	// are enough verdicts.
+	Calibration *Calibration `json:"calibration,omitempty"`
 }
 
 // Provenance records that a finding was produced by an LLM and which one.

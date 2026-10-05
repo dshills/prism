@@ -343,6 +343,22 @@ In a language with multi-line strings or block comments (most of them), a hunk b
 
 Finding directives is best-effort. The lexer knows each language's comments and common string forms, but not every one. Rust raw and multi-line strings, YAML block scalars, and heredocs (shell, Ruby, Perl, PHP) aren't modeled, so text shaped like a directive inside them is taken as one. Anyone who can write such a string can also add a real comment, so this isn't a new way to suppress a finding, only a rare accident. When suppression has to be exact, use the baseline.
 
+## Recording Verdicts
+
+A model's `confidence` is its own claim. A finding's `calibration` is its track record: how often findings like it turned out to be real. After deciding what to do with a finding, record the verdict:
+
+```bash
+prism findings confirm <id>...   # a real problem, acted on (alias: accept)
+prism findings dismiss <id>...   # a false positive
+prism findings stats             # confirm rate by category
+```
+
+- **Where verdicts go:** each ID is looked up in the repository's last review, and the verdict is appended to `feedback.jsonl` in the cache directory, readable only by you. The log covers every repository, since a model's record in a category holds wherever it reviews.
+- **What findings get:** once there are 5 verdicts, each finding in JSON output carries `calibration: {confirmRate, samples, scope}`.
+  - The scope is `model` when its provider, model and category have 5 verdicts, and `category` (every model) otherwise.
+  - A finding judged twice counts once, by its latest verdict.
+- **Not the baseline:** `prism baseline add` stops a finding being reported. A verdict only records whether it was right.
+
 ## Function Context
 
 A plain diff shows three lines around each change, not the function it's in. The model can't see the signature, the receiver or the variables in scope, and that's where many false positives ("err is not checked", "x may be nil") and missed bugs come from. Prism widens each hunk to its whole enclosing function (`git diff --function-context`). It does this file by file, keeping a file's plain hunks when widening would grow it more than 3× or 4 KB beyond the plain diff, whichever allows more, so one change inside a very long function can't bloat the review. `coverage.widenedFiles` counts the widened files.

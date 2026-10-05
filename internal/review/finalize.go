@@ -49,6 +49,7 @@ func FinalizeFindings(ctx context.Context, findings []Finding, diff gitctx.DiffR
 	if cfg.MaxFindings > 0 && len(findings) > cfg.MaxFindings {
 		findings = findings[:cfg.MaxFindings]
 	}
+	calibrate(findings, cfg)
 	return findings, discarded, suppressed, nil
 }
 

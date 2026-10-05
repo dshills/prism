@@ -34,7 +34,7 @@ Prism is run by AI coding agents (Claude Code, Codex), not by people at a termin
 | 21 | Second-opinion check for blocking findings | Accuracy | Low | **Done** |
 | 22 | Concurrent per-commit review | Speed | Low | **Done** |
 | 23 | Trim repeated per-chunk prompt overhead | Tokens | Low | **Done** |
-| 24 | Confidence calibration | Accuracy | Low | Not started |
+| 24 | Confidence calibration | Accuracy | Low | **Done** |
 | 25 | `prism github post-comments` | Workflow | Low | Not started |
 | — | Per-file incremental cache invalidation | Speed, Tokens | — | **Done** (f844f11) |
 
@@ -482,7 +482,17 @@ The glob matching already exists in `diffutil`. For each chunk, the prompt build
 
 ---
 
-### 24. Confidence calibration via local feedback log
+### 24. Confidence calibration via local feedback log (DONE)
+
+**Status:** Done.
+- **Commands:** `prism findings confirm|dismiss <id>... [--reason]` (`accept` is an alias for `confirm`).
+  - Each ID is looked up in the repository's last review for its category, severity, provider, model and confidence. Every ID is checked before anything is written.
+  - Verdicts are appended to `feedback.jsonl` (0600) in the cache directory, across repositories. `prism findings stats` prints confirm rates by category.
+  - The names `confirm`/`dismiss` keep it distinct from `baseline add`, which suppresses a finding.
+- **Calibration:** `FinalizeFindings` sets `calibration: {confirmRate, samples, scope}` on each finding from the log, best effort.
+  - The scope is the finding's provider, model and category when that has 5 verdicts, and otherwise the category over every model.
+  - The latest verdict on a finding counts. Bad log lines are skipped.
+- **Not covered:** gating on calibration. `--fail-on` still uses severity alone, and agents weight findings by `confirmRate` themselves.
 
 **Problem:** Confidence scores (0.0–1.0) come from the LLM and aren't calibrated. A "0.9 confidence" finding may be a false positive, and a "0.5" may be critical. Agents can't use confidence to decide what to act on.
 
