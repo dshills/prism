@@ -141,6 +141,9 @@ func shouldFallBack(ctx context.Context, err error) bool {
 	if ctx.Err() != nil || errors.Is(err, context.Canceled) {
 		return false
 	}
+	if IsTruncated(err) {
+		return false // the output is too long for one response, from any model
+	}
 	var re *requestError
 	if errors.As(err, &re) {
 		switch re.status {

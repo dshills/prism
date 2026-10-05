@@ -125,6 +125,9 @@ func (g *Gemini) review(ctx context.Context, req ReviewRequest, structured bool)
 			return fmt.Errorf("parsing response: %w", err)
 		}
 
+		if len(result.Candidates) > 0 && result.Candidates[0].FinishReason == "MAX_TOKENS" {
+			return &truncatedError{maxTokens: body.GenerationConfig.MaxOutputTokens}
+		}
 		if len(result.Candidates) == 0 || len(result.Candidates[0].Content.Parts) == 0 {
 			return fmt.Errorf("no content in response")
 		}
@@ -179,6 +182,9 @@ type geminiResponse struct {
 
 type geminiCandidate struct {
 	Content geminiContent `json:"content"`
+	// FinishReason is "MAX_TOKENS" when the output limit cut the response
+	// off.
+	FinishReason string `json:"finishReason"`
 }
 
 type geminiUsage struct {

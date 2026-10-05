@@ -32,6 +32,9 @@ type Coverage struct {
 	// CachedChunks is how many of Chunks were replayed from cache instead of
 	// sent to a model. It equals Chunks on a full cache hit.
 	CachedChunks int `json:"cachedChunks"`
+	// Splits counts parts halved and reviewed again because a model's
+	// response was cut off at its output limit.
+	Splits int `json:"splits,omitempty"`
 	// Excluded lists the files prism's own rules left out (lockfiles,
 	// generated code, deletions, ...), and why. Leaving them out is policy,
 	// so it does not make the review incomplete.
@@ -103,6 +106,7 @@ func (c *Coverage) Add(o Coverage, first bool) {
 	c.Chunks += o.Chunks
 	c.LLMCalls += o.LLMCalls
 	c.CachedChunks += o.CachedChunks
+	c.Splits += o.Splits
 	c.Excluded = append(c.Excluded, o.Excluded...)
 	if c.Fallback == nil {
 		c.Fallback = o.Fallback
@@ -147,6 +151,9 @@ func (c Coverage) Describe(llmMs int64) string {
 		line := fmt.Sprintf("Reviewed %s in %s by %s — %s, %.1fs",
 			size, chunks, reviewerLabel(c.Reviewer),
 			plural(c.LLMCalls, "LLM call"), float64(llmMs)/1000)
+		if c.Splits > 0 {
+			line += fmt.Sprintf(" (%s split after a cut-off response)", plural(c.Splits, "part"))
+		}
 		if c.Fallback != nil {
 			line += fmt.Sprintf(" (fell back to %s/%s: %s)", c.Fallback.Reviewer.Provider, c.Fallback.Reviewer.Model, c.Fallback.Reason)
 		}

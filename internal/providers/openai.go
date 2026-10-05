@@ -133,6 +133,9 @@ func (o *OpenAI) review(ctx context.Context, req ReviewRequest, structured bool)
 		if len(result.Choices) == 0 {
 			return fmt.Errorf("no choices in response")
 		}
+		if result.Choices[0].FinishReason == "length" {
+			return &truncatedError{maxTokens: maxTokens}
+		}
 		if result.Choices[0].Message.Content == "" {
 			return fmt.Errorf("empty text content in API response")
 		}
@@ -251,6 +254,8 @@ type openaiResponse struct {
 
 type openaiChoice struct {
 	Message openaiMessage `json:"message"`
+	// FinishReason is "length" when the output limit cut the response off.
+	FinishReason string `json:"finish_reason"`
 }
 
 type openaiUsage struct {

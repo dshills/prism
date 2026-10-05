@@ -234,54 +234,21 @@ func reviewWholeCached(ctx context.Context, redactedDiff string, files []string,
 		return nil, 0, err
 	}
 	defer noteFallback(cov, provider)
-	sysPr, userPr := builder(redactedDiff, files, cfg, rules)
 
-	llmStart := time.Now()
-	req := providers.ReviewRequest{
-		SystemPrompt: sysPr,
-		UserPrompt:   userPr,
-		MaxTokens:    8192,
-		Output:       findingsOutput,
-	}
-
-	resp, err := provider.Review(ctx, req)
-	cov.LLMCalls += providers.CallsOf(resp)
+	pr := &partReviewer{provider: provider, cfg: cfg, rules: rules, builder: builder}
+	res, err := pr.review(ctx, part{diff: redactedDiff, files: files}, 0)
+	cov.LLMCalls += res.calls
+	cov.Splits += res.splits
 	if err != nil {
-		return nil, 0, fmt.Errorf("provider review: %w", err)
+		return nil, res.llmMs, fmt.Errorf("provider review: %w", err)
 	}
-	llmMs := time.Since(llmStart).Milliseconds()
+	// A part split after a cut-off response returns its halves' findings.
+	findings := mergeChunkFindings([][]Finding{res.findings})
 
-	findings, err := parseReviewedFindings(resp.Content, redactedDiff)
-	if err != nil {
-		// Attempt one repair pass
-		repairPrompt := fmt.Sprintf(
-			"Your previous response was not valid JSON. The error was: %s\n\nPlease fix it and respond with ONLY a valid JSON array of findings.\n\nYour previous response was:\n%s",
-			err.Error(), resp.Content,
-		)
-		repairReq := providers.ReviewRequest{
-			SystemPrompt: sysPr,
-			UserPrompt:   repairPrompt,
-			MaxTokens:    8192,
-			Output:       findingsOutput,
-		}
-		resp2, err2 := provider.Review(ctx, repairReq)
-		cov.LLMCalls += providers.CallsOf(resp2)
-		if err2 != nil {
-			return nil, llmMs, fmt.Errorf("repair pass failed: %w (original error: %w)", err2, err)
-		}
-		findings, err = parseReviewedFindings(resp2.Content, redactedDiff)
-		if err != nil {
-			return nil, llmMs, fmt.Errorf("response validation failed after repair: %w", err)
-		}
-		resp = resp2
-	}
-	findings = stampProvenance(findings, resp.Provider, resp.Model)
-	SortFindings(findings)
-
-	if !resp.Fallback { // a fallback's review is not cached as this model's
+	if !res.fallback { // a fallback's review is not cached as this model's
 		putFindings(rc, cacheKey, findings)
 	}
-	return findings, llmMs, nil
+	return findings, res.llmMs, nil
 }
 
 // reviewChunksCached reviews a chunked diff with one cache entry per chunk. A
@@ -318,6 +285,7 @@ func reviewChunksCached(ctx context.Context, chunks []Chunk, cfg config.Config, 
 	run := reviewChunks(ctx, chunks, todo, provider, cfg, rules, builder)
 	noteFallback(cov, provider)
 	cov.LLMCalls = run.calls
+	cov.Splits = run.splits
 	haveResults := cov.CachedChunks > 0
 	for _, i := range todo {
 		if run.errs[i] == nil {
@@ -578,7 +546,7 @@ func runCodebaseWithFileCache(
 		cov.Chunks = len(chunks)
 		run := reviewChunks(ctx, chunks, nil, provider, cfg.Config, rules, codebaseBuilder)
 		noteFallback(&cov, provider)
-		llmMs, cov.LLMCalls = run.llmMs, run.calls
+		llmMs, cov.LLMCalls, cov.Splits = run.llmMs, run.calls, run.splits
 		perChunk, errs := run.findings, run.errs
 
 		// Step 8: Store fresh findings per file for future cache hits (FR-4),

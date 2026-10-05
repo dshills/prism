@@ -122,6 +122,9 @@ func (a *Anthropic) review(ctx context.Context, req ReviewRequest, structured bo
 			return fmt.Errorf("parsing response: %w", err)
 		}
 
+		if result.StopReason == "max_tokens" {
+			return &truncatedError{maxTokens: maxTokens}
+		}
 		var content string
 		for _, block := range result.Content {
 			if block.Type == "text" {
@@ -170,6 +173,8 @@ type anthropicMessage struct {
 type anthropicResponse struct {
 	Content []anthropicBlock `json:"content"`
 	Usage   anthropicUsage   `json:"usage"`
+	// StopReason is "max_tokens" when the output limit cut the response off.
+	StopReason string `json:"stop_reason"`
 }
 
 type anthropicBlock struct {

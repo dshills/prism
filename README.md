@@ -390,6 +390,10 @@ prism review staged --rules rules.json
 
 Prism asks every provider for its findings in the provider's structured-output mode, constrained to a JSON schema: `response_format` for OpenAI (and OpenAI-compatible servers through the `ollama` provider), `output_config.format` for Anthropic, and `responseSchema` for Gemini. Responses are therefore always valid JSON with valid severities and categories, and the repair call for malformed output is rarely needed. An endpoint that doesn't support it is detected on its first refusal and asked in plain JSON from then on. The live check is `go test -tags integration -run TestStructuredOutputLive ./internal/review`.
 
+### Cut-off Responses
+
+Every request has an output limit of 8192 tokens, and on reasoning models hidden reasoning counts toward it too. Prism checks why each response stopped: Anthropic `stop_reason: max_tokens`, OpenAI and Ollama `finish_reason: length`, Gemini `finishReason: MAX_TOKENS`. A cut-off answer is never parsed. Instead the part is split in half, by file or (for one file) by hunk, and each half is reviewed, up to four levels deep. A part that can't be split is asked once more with twice the limit. If it's still cut off, it's listed under `coverage.skipped` and the review is incomplete (exit 5), rather than reporting a partial list. `coverage.splits` counts the halvings.
+
 ### Fallback Provider
 
 An agent can't fix a provider outage, so with only one provider an expired key or a rate-limit storm loses the review gate. Set a fallback:

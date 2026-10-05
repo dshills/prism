@@ -6,7 +6,6 @@ import (
 	"sort"
 	"strings"
 	"sync"
-	"time"
 
 	"github.com/dshills/prism/internal/config"
 	"github.com/dshills/prism/internal/diffutil"
@@ -217,6 +216,7 @@ type chunkRun struct {
 	fallback []bool
 	llmMs    int64
 	calls    int
+	splits   int // parts halved after a cut-off response
 }
 
 // reviewChunks reviews chunks in parallel and returns each chunk's findings
@@ -247,6 +247,7 @@ func reviewChunks(ctx context.Context, chunks []Chunk, todo []int, provider prov
 		rpm = providers.DefaultRPM(provider.Name())
 	}
 	limiter := ratelimit.New(rpm)
+	pr := &partReviewer{provider: provider, cfg: cfg, rules: rules, builder: builder, limiter: limiter}
 
 	run := chunkRun{
 		findings: make([][]Finding, len(chunks)),
@@ -265,64 +266,18 @@ func reviewChunks(ctx context.Context, chunks []Chunk, todo []int, provider prov
 			sem <- struct{}{}        // acquire
 			defer func() { <-sem }() // release
 
-			if err := limiter.Wait(ctx); err != nil {
-				errs[i] = fmt.Errorf("rate limiter: %w", err)
-				return
-			}
-
-			sysPr, userPr := builder(chunk.Diff, chunk.Files, cfg, rules)
-			userPr += otherPartsNote(chunks, i)
-			req := providers.ReviewRequest{
-				SystemPrompt: sysPr,
-				UserPrompt:   userPr,
-				MaxTokens:    8192,
-				Output:       findingsOutput,
-			}
-
-			llmStart := time.Now()
-			resp, err := provider.Review(ctx, req)
-			elapsed := time.Since(llmStart).Milliseconds()
-
+			res, err := pr.review(ctx, part{diff: chunk.Diff, files: chunk.Files, note: otherPartsNote(chunks, i)}, 0)
 			mu.Lock()
-			run.llmMs += elapsed
-			run.calls += providers.CallsOf(resp)
+			run.llmMs += res.llmMs
+			run.calls += res.calls
+			run.splits += res.splits
 			mu.Unlock()
-
 			if err != nil {
 				errs[i] = err
 				return
 			}
-
-			findings, err := parseReviewedFindings(resp.Content, chunk.Diff)
-			if err != nil {
-				// Try repair
-				repairPrompt := fmt.Sprintf(
-					"Your previous response was not valid JSON. The error was: %s\n\nPlease fix and respond with ONLY a valid JSON array of findings.\n\nPrevious response:\n%s",
-					err.Error(), resp.Content,
-				)
-				resp2, err2 := provider.Review(ctx, providers.ReviewRequest{
-					SystemPrompt: sysPr,
-					UserPrompt:   repairPrompt,
-					MaxTokens:    8192,
-					Output:       findingsOutput,
-				})
-				mu.Lock()
-				run.calls += providers.CallsOf(resp2)
-				mu.Unlock()
-				if err2 != nil {
-					errs[i] = fmt.Errorf("repair: %w", err2)
-					return
-				}
-				findings, err = parseReviewedFindings(resp2.Content, chunk.Diff)
-				if err != nil {
-					errs[i] = fmt.Errorf("validation after repair: %w", err)
-					return
-				}
-				resp = resp2
-			}
-
-			run.findings[i] = stampProvenance(findings, resp.Provider, resp.Model)
-			run.fallback[i] = resp.Fallback
+			run.findings[i] = res.findings
+			run.fallback[i] = res.fallback
 		}(i, chunks[i])
 	}
 

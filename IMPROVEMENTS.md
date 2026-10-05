@@ -21,7 +21,7 @@ Prism is run by AI coding agents (Claude Code, Codex), not by people at a termin
 | 8 | Fallback provider | Workflow | High | **Done** |
 | 9 | Delta mode: net-new findings | Workflow | High | **Done** |
 | 10 | Skip content not worth reviewing | Tokens, Speed | High | **Done** |
-| 11 | Detect truncated responses | Accuracy, Tokens | High | Not started |
+| 11 | Detect truncated responses | Accuracy, Tokens | High | **Done** |
 | 12 | Token usage reporting | Tokens | Medium | Not started |
 | 13 | Function context around hunks | Accuracy | Medium | Not started |
 | 14 | Compare mode on the full pipeline | Accuracy, Speed, Tokens | Medium | Not started |
@@ -254,7 +254,14 @@ A deleted file has no post-image lines, so no finding on it can pass evidence ve
 
 ---
 
-### 11. Detect truncated responses
+### 11. Detect truncated responses (DONE)
+
+**Status:** Done.
+- **Detection:** each provider returns a typed truncation error (`providers.IsTruncated`) for `stop_reason: max_tokens`, `finish_reason: length` or `finishReason: MAX_TOKENS`. It's checked before the content, so an empty reasoning-model answer is a truncation too. It isn't retried, and the fallback doesn't switch on it.
+- **Recovery:** single-diff and chunked reviews now share one `reviewPart`, which also replaced two copies of the request-and-repair code. A cut-off response is never parsed or repaired. The part is halved instead, by file at the byte midpoint, or by hunk with the file header kept, up to four levels deep. Each half's prompt says what the other half holds.
+- **When it can't split:** an unsplittable part is asked once more at 16384 tokens. If it's still cut off, it's an error: a chunk becomes a coverage skip (exit 5), and a single-diff review fails with the reason.
+- **Reporting:** `coverage.splits` counts the halvings, and the text line says `N parts split after a cut-off response`.
+- **Not covered:** compare mode still uses its own request without this (#14).
 
 **Problem:** Every call uses a fixed `MaxTokens: 8192`, and no provider checks why the response stopped. The stop signals are Anthropic `stop_reason: "max_tokens"`, OpenAI `finish_reason: "length"` and Gemini `finishReason: "MAX_TOKENS"`. When a response hits the limit, the cut-off JSON goes to the repair pass, which only sees the truncated text. The review then either fails or quietly reports a partial list. On reasoning models (GPT-5 and the o-series, Gemini thinking models), hidden reasoning tokens count toward the same limit, so a hard chunk can come back empty.
 

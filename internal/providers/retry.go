@@ -171,3 +171,22 @@ func retryWithBackoff(ctx context.Context, maxRetries int, fn func() error) erro
 	}
 	return lastErr
 }
+
+// truncatedError is a response cut off at its output limit. Its content is
+// incomplete, so it is never parsed; the caller reviews smaller parts or asks
+// for a larger limit instead. On reasoning models the limit also covers the
+// hidden reasoning, so the cut can come before any visible output.
+type truncatedError struct {
+	maxTokens int
+}
+
+func (e *truncatedError) Error() string {
+	return fmt.Sprintf("response cut off at the output limit (%d tokens)", e.maxTokens)
+}
+
+// IsTruncated reports whether err is, or wraps, a response cut off at its
+// output limit.
+func IsTruncated(err error) bool {
+	var te *truncatedError
+	return errors.As(err, &te)
+}

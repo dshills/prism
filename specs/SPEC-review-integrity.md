@@ -61,6 +61,7 @@ review path: single, chunked, compare, codebase, per-commit range, and
 | `chunks` | int | Review units sent to a model: 1 for an unchunked diff, N for chunked, 0 when nothing was sent. |
 | `llmCalls` | int | Model calls made in this run, including repair passes and a failed call to the primary provider before its fallback answered. Retries of one call inside a provider are not counted. 0 when the result came entirely from cache. |
 | `cacheHit` | bool | All the findings were replayed from cache: no chunk was sent. |
+| `splits` | int | Parts halved and reviewed again because a response was cut off at the output limit (omitted when 0). A part that stays cut off is a `skipped` entry. |
 | `excluded` | `[]{path, reason}` | Files prism's own rules left out: lockfiles, generated code, minified assets, snapshots, deletions, and sections with no text changes. This is policy, not a gap: it does not make the report incomplete. Empty when there are none or `autoExclude` is off. |
 | `fallback` | `{reviewer: {provider, model}, reason}` | Present when the configured provider failed and the fallback provider reviewed instead (all or part of the input); `reason` is the primary's failure. The fallback is also listed in `reviewer`. |
 | `cachedChunks` | int | Of `chunks`, how many were replayed from cache instead of sent. Equals `chunks` when `cacheHit` is true. |
