@@ -451,6 +451,9 @@ func TestEmptyReport(t *testing.T) {
 // Helpers shared by per-file cache tests
 // ---------------------------------------------------------------------------
 
+// testPrompt stands in for a promptFingerprint in per-file cache keys.
+const testPrompt = "test-prompt"
+
 // makeSection builds a minimal codebase-style pseudo-diff section for a file.
 func makeSection(path, content string) string {
 	return fmt.Sprintf("diff --git a/%s b/%s\n--- /dev/null\n+++ b/%s\n@@ -0,0 +1 @@\n+%s\n",
@@ -497,8 +500,8 @@ func TestRunCodebaseFileCache_AllMiss(t *testing.T) {
 
 	rc := makeTestCache(t)
 
-	key1 := cache.BuildCacheKey(provider, model, section1)
-	key2 := cache.BuildCacheKey(provider, model, section2)
+	key1 := fileCacheKey(provider, model, testPrompt, section1)
+	key2 := fileCacheKey(provider, model, testPrompt, section2)
 
 	// Pre-verify: cache is empty, so both sections are misses.
 	if _, ok := rc.Get(key1); ok {
@@ -517,7 +520,7 @@ func TestRunCodebaseFileCache_AllMiss(t *testing.T) {
 		freshFindings[i].ID = generateFindingID(freshFindings[i])
 	}
 
-	storeFindingsPerFile(rc, []string{section1, section2}, freshFindings, provider, model)
+	storeFindingsPerFile(rc, []string{section1, section2}, freshFindings, provider, model, testPrompt)
 
 	// After storing, both keys must be cache hits.
 	if _, ok := rc.Get(key1); !ok {
@@ -531,7 +534,7 @@ func TestRunCodebaseFileCache_AllMiss(t *testing.T) {
 	var cachedFindings []Finding
 	var uncachedSections []string
 	for _, section := range []string{section1, section2} {
-		key := cache.BuildCacheKey(provider, model, section)
+		key := fileCacheKey(provider, model, testPrompt, section)
 		if got, ok := rc.Get(key); ok {
 			parsed, err := parseFindings(got)
 			if err == nil {
@@ -561,8 +564,8 @@ func TestRunCodebaseFileCache_AllCached(t *testing.T) {
 	rc := makeTestCache(t)
 
 	// Pre-populate both sections.
-	key1 := cache.BuildCacheKey(provider, model, section1)
-	key2 := cache.BuildCacheKey(provider, model, section2)
+	key1 := fileCacheKey(provider, model, testPrompt, section1)
+	key2 := fileCacheKey(provider, model, testPrompt, section2)
 	if err := rc.Put(key1, rawFindingJSON("alpha.go", "Finding Alpha", 5)); err != nil {
 		t.Fatalf("Put key1: %v", err)
 	}
@@ -582,7 +585,7 @@ func TestRunCodebaseFileCache_AllCached(t *testing.T) {
 	var cachedFindings []Finding
 	var uncachedSections []string
 	for _, section := range []string{section1, section2} {
-		key := cache.BuildCacheKey(provider, model, section)
+		key := fileCacheKey(provider, model, testPrompt, section)
 		if cached, ok := rc.Get(key); ok {
 			parsed, err := parseFindings(cached)
 			if err == nil {
@@ -613,7 +616,7 @@ func TestRunCodebaseFileCache_PartialHit(t *testing.T) {
 	rc := makeTestCache(t)
 
 	// Only cache section1.
-	key1 := cache.BuildCacheKey(provider, model, section1)
+	key1 := fileCacheKey(provider, model, testPrompt, section1)
 	if err := rc.Put(key1, rawFindingJSON("cached.go", "Cached finding", 3)); err != nil {
 		t.Fatalf("Put key1: %v", err)
 	}
@@ -621,7 +624,7 @@ func TestRunCodebaseFileCache_PartialHit(t *testing.T) {
 	var cachedFindings []Finding
 	var uncachedSections []string
 	for _, section := range []string{section1, section2} {
-		key := cache.BuildCacheKey(provider, model, section)
+		key := fileCacheKey(provider, model, testPrompt, section)
 		if cached, ok := rc.Get(key); ok {
 			parsed, err := parseFindings(cached)
 			if err == nil {
@@ -650,7 +653,7 @@ func TestRunCodebaseFileCache_PartialHit(t *testing.T) {
 	for i := range freshFindings {
 		freshFindings[i].ID = generateFindingID(freshFindings[i])
 	}
-	storeFindingsPerFile(rc, uncachedSections, freshFindings, provider, model)
+	storeFindingsPerFile(rc, uncachedSections, freshFindings, provider, model, testPrompt)
 
 	// Both findings in the merged set.
 	allFindings := append(cachedFindings, freshFindings...)
@@ -659,7 +662,7 @@ func TestRunCodebaseFileCache_PartialHit(t *testing.T) {
 	}
 
 	// The previously-uncached section should now be cached.
-	key2 := cache.BuildCacheKey(provider, model, section2)
+	key2 := fileCacheKey(provider, model, testPrompt, section2)
 	if _, ok := rc.Get(key2); !ok {
 		t.Error("expected section2 to be cached after storeFindingsPerFile")
 	}
@@ -675,9 +678,9 @@ func TestRunCodebaseFileCache_EmptyFindingsStored(t *testing.T) {
 
 	// Simulate: LLM returns no findings for this file.
 	freshFindings := []Finding{}
-	storeFindingsPerFile(rc, []string{section}, freshFindings, provider, model)
+	storeFindingsPerFile(rc, []string{section}, freshFindings, provider, model, testPrompt)
 
-	key := cache.BuildCacheKey(provider, model, section)
+	key := fileCacheKey(provider, model, testPrompt, section)
 	cached, ok := rc.Get(key)
 	if !ok {
 		t.Fatal("expected cache entry to be written even when findings are empty")
@@ -717,7 +720,7 @@ func TestRunCodebaseFileCache_CorruptCacheEntry(t *testing.T) {
 	rc := makeTestCache(t)
 
 	// Write corrupt JSON directly to the cache key.
-	key := cache.BuildCacheKey(provider, model, section)
+	key := fileCacheKey(provider, model, testPrompt, section)
 	if err := rc.Put(key, "not valid json {{{{"); err != nil {
 		t.Fatalf("Put: %v", err)
 	}
@@ -799,10 +802,10 @@ func TestStoreFindingsPerFile_SkipsOnUnattributableFinding(t *testing.T) {
 		{Severity: SeverityHigh, Title: "No path finding"},
 	}
 
-	storeFindingsPerFile(rc, []string{section}, findings, provider, model)
+	storeFindingsPerFile(rc, []string{section}, findings, provider, model, testPrompt)
 
 	// No cache entry must be written.
-	key := cache.BuildCacheKey(provider, model, section)
+	key := fileCacheKey(provider, model, testPrompt, section)
 	if _, ok := rc.Get(key); ok {
 		t.Error("expected NO cache entry when a finding has no primary path")
 	}
@@ -825,9 +828,9 @@ func TestStoreFindingsPerFile_SkipsOnEmptyPathLocation(t *testing.T) {
 		},
 	}
 
-	storeFindingsPerFile(rc, []string{section}, findings, provider, model)
+	storeFindingsPerFile(rc, []string{section}, findings, provider, model, testPrompt)
 
-	key := cache.BuildCacheKey(provider, model, section)
+	key := fileCacheKey(provider, model, testPrompt, section)
 	if _, ok := rc.Get(key); ok {
 		t.Error("expected NO cache entry when finding has empty primary path")
 	}

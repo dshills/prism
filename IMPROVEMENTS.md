@@ -11,7 +11,7 @@ Prism is run by AI coding agents (Claude Code, Codex), not by people at a termin
 
 | # | Item | Improves | Priority | Status |
 |---|------|----------|----------|--------|
-| 1 | Cache keys that cover every prompt input | Accuracy | High | Not started |
+| 1 | Cache keys that cover every prompt input | Accuracy | High | **Done** |
 | 2 | Per-chunk caching for diff modes | Speed, Tokens | High | Not started |
 | 3 | Keep partial results when a chunk fails | Speed, Tokens | High | Not started |
 | 4 | Stable finding fingerprints | Accuracy, Workflow | High | Not started |
@@ -42,7 +42,9 @@ Prism is run by AI coding agents (Claude Code, Codex), not by people at a termin
 
 ## 🟥 High Impact
 
-### 1. Cache keys that cover every prompt input
+### 1. Cache keys that cover every prompt input (DONE)
+
+**Status:** Done. `promptFingerprint` hashes the system prompt and the user prompt rendered around an empty diff, so every builder input is covered without being listed by hand. `reviewCacheKey` adds that fingerprint and `chunkerVersion` to both the diff key and the per-file key. The severity policy in the rules section is now sorted, so the same rules always give the same prompt and the same key.
 
 **Problem:** A cached review is replayed whenever its key matches, but the keys leave out inputs that change what the model is asked:
 
@@ -329,7 +331,6 @@ The glob matching already exists in `diffutil`. For each chunk, the prompt build
 
 | Item | Effort | Notes |
 |------|--------|-------|
-| Cache keys cover every prompt input (#1) | ~1 hr | One shared key helper for both cache paths |
 | Low-temperature sampling (#16) | ~1 hr | `Temperature` is already plumbed through three of the four providers |
 | Severity floor in the prompt (#15) | ~1 hr | One prompt line plus a post-parse filter |
 | Function context option (#13) | ~1 hr | Pass `-W` to `git diff` |

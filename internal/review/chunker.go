@@ -26,9 +26,10 @@ const (
 	// lists, so codebase reviews of thousands of files stay bounded.
 	maxContextFiles = 200
 
-	// chunkerVersion is part of the diff cache key. Bump it whenever
-	// SplitIntoChunks, the per-chunk prompt or the system prompts change, so
-	// reviews cached under the old behaviour are not replayed. 4: findings
+	// chunkerVersion is part of every cache key (reviewCacheKey). What the
+	// prompt builders write is keyed by promptFingerprint, so a change to the
+	// system or user prompt needs no bump; bump it when SplitIntoChunks or
+	// otherPartsNote change, which the fingerprint cannot see. 4: findings
 	// quote their evidence (specs/SPEC-review-integrity.md FR-4).
 	chunkerVersion = 4
 )

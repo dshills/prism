@@ -3,15 +3,17 @@ package review
 import (
 	"encoding/json"
 	"fmt"
+	"maps"
 	"os"
+	"slices"
 	"strings"
 )
 
 // Rules represents a rules pack loaded from --rules.
 type Rules struct {
-	Focus             []string                    `json:"focus,omitempty"`
-	SeverityOverrides map[string]string           `json:"severityOverrides,omitempty"`
-	Required          []RequiredCheck             `json:"required,omitempty"`
+	Focus             []string          `json:"focus,omitempty"`
+	SeverityOverrides map[string]string `json:"severityOverrides,omitempty"`
+	Required          []RequiredCheck   `json:"required,omitempty"`
 }
 
 // RequiredCheck is a policy check that should always be enforced.
@@ -50,9 +52,11 @@ func BuildRulesPromptSection(rules *Rules) string {
 	}
 
 	if len(rules.SeverityOverrides) > 0 {
+		// Sorted, so the same rules always give the same prompt: it is part
+		// of the cache key (promptFingerprint).
 		b.WriteString("\nSeverity policy:\n")
-		for cat, sev := range rules.SeverityOverrides {
-			fmt.Fprintf(&b, "- %s findings should be rated as %s severity.\n", cat, sev)
+		for _, cat := range slices.Sorted(maps.Keys(rules.SeverityOverrides)) {
+			fmt.Fprintf(&b, "- %s findings should be rated as %s severity.\n", cat, rules.SeverityOverrides[cat])
 		}
 	}
 

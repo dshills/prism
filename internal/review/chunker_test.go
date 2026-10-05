@@ -245,13 +245,13 @@ func TestRunChunked_PromptsListOtherParts(t *testing.T) {
 func TestDiffCacheKey_IncludesChunkSize(t *testing.T) {
 	a, b := config.Default(), config.Default()
 	b.ChunkBytes = a.ChunkBytes * 2
-	if diffCacheKey(a, "diff") == diffCacheKey(b, "diff") {
+	if diffCacheKey(a, "p", "diff") == diffCacheKey(b, "p", "diff") {
 		t.Error("cache key ignores chunk size")
 	}
 	c := config.Default()
 	c.ChunkBytes = 0 // unset means the default, so it keys like the default
 	a.ChunkBytes = DefaultChunkBytes
-	if diffCacheKey(a, "diff") != diffCacheKey(c, "diff") {
+	if diffCacheKey(a, "p", "diff") != diffCacheKey(c, "p", "diff") {
 		t.Error("unset chunk size should key the same as the default")
 	}
 }

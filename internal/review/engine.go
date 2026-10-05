@@ -48,13 +48,39 @@ func Run(ctx context.Context, diff gitctx.DiffResult, cfg config.Config) (*Repor
 	return reviewPipeline(ctx, diff, cfg, reviewOpts{})
 }
 
+// promptFingerprint hashes everything builder puts into a prompt besides the
+// reviewed text: the system prompt, and the user prompt rendered around an
+// empty diff. That covers maxFindings, failOn, the rules section and any
+// input a builder adds later. Every cache key includes it, so changing what
+// the model is asked is a cache miss, never a replay of a review that was
+// asked something else.
+func promptFingerprint(builder PromptBuilder, cfg config.Config, rules *Rules) string {
+	sys, user := builder("", nil, cfg, rules)
+	h := sha256.Sum256([]byte(sys + "\x00" + user))
+	return fmt.Sprintf("%x", h[:16])
+}
+
+// reviewCacheKey keys a cached review of content, shared by diff and
+// codebase reviews. Besides the prompt it carries chunkerVersion, which
+// covers what the fingerprint cannot see: how a diff is split, and the
+// per-part note that lists the other parts' files.
+func reviewCacheKey(provider, model, prompt, content string) string {
+	return cache.BuildCacheKey(provider, model,
+		fmt.Sprintf("chunker=%d,prompt=%s\n%s", chunkerVersion, prompt, content))
+}
+
 // diffCacheKey keys a diff review's cached result. How the diff is chunked is
 // part of the key, both the size and the algorithm (chunkerVersion): the same
 // diff reviewed in different chunks is a different review, and results cached
 // under older chunking must not be replayed as current.
-func diffCacheKey(cfg config.Config, diff string) string {
-	return cache.BuildCacheKey(cfg.Provider, cfg.Model,
-		fmt.Sprintf("chunker=%d,chunkBytes=%d\n%s", chunkerVersion, effectiveChunkBytes(cfg.ChunkBytes), diff))
+func diffCacheKey(cfg config.Config, prompt, diff string) string {
+	return reviewCacheKey(cfg.Provider, cfg.Model, prompt,
+		fmt.Sprintf("chunkBytes=%d\n%s", effectiveChunkBytes(cfg.ChunkBytes), diff))
+}
+
+// fileCacheKey keys one file's cached findings in a codebase review.
+func fileCacheKey(provider, model, prompt, section string) string {
+	return reviewCacheKey(provider, model, prompt, section)
 }
 
 // reviewPipeline is the shared review flow: redact → cache → rules → LLM → cache write → overrides → limit → report.
@@ -90,7 +116,18 @@ func reviewPipeline(ctx context.Context, diff gitctx.DiffResult, cfg config.Conf
 		reviewCache, _ = cache.New(false, "", 0)
 	}
 
-	cacheKey := diffCacheKey(cfg, redactedDiff)
+	// Rules and the prompt builder come before the cache: both shape the
+	// prompt, so both are part of the key.
+	rules, err := LoadRules(cfg.RulesFile)
+	if err != nil {
+		return nil, fmt.Errorf("loading rules: %w", err)
+	}
+	builder := opts.builder
+	if builder == nil {
+		builder = defaultPromptBuilder
+	}
+
+	cacheKey := diffCacheKey(cfg, promptFingerprint(builder, cfg, rules), redactedDiff)
 
 	// Check cache
 	var findings []Finding
@@ -108,12 +145,6 @@ func reviewPipeline(ctx context.Context, diff gitctx.DiffResult, cfg config.Conf
 		}
 	}
 
-	// Load rules
-	rules, err := LoadRules(cfg.RulesFile)
-	if err != nil {
-		return nil, fmt.Errorf("loading rules: %w", err)
-	}
-
 	if findings == nil {
 		provider, err := providers.New(cfg.Provider, cfg.Model)
 		if err != nil {
@@ -123,16 +154,12 @@ func reviewPipeline(ctx context.Context, diff gitctx.DiffResult, cfg config.Conf
 		// Use chunked review for large diffs or when always requested (codebase mode)
 		if chunks != nil {
 			findings, llmMs, cov.LLMCalls, err = runChunkedCounted(ctx, chunks, provider, cfg, rules, ChunkOptions{
-				Builder: opts.builder,
+				Builder: builder,
 			})
 			if err != nil {
 				return nil, fmt.Errorf("chunked review: %w", err)
 			}
 		} else {
-			builder := opts.builder
-			if builder == nil {
-				builder = defaultPromptBuilder
-			}
 			sysPr, userPr := builder(redactedDiff, diff.Files, cfg, rules)
 
 			llmStart := time.Now()
@@ -380,9 +407,15 @@ func runCodebaseWithFileCache(
 	// Step 3: Split into per-file sections.
 	sections := diffutil.SplitSections(redactedDiff)
 
+	maxPerFile := cfg.MaxFindingsPerFile
+	codebaseBuilder := func(chunkDiff string, files []string, c config.Config, r *Rules) (string, string) {
+		return CodebaseSystemPrompt(), BuildCodebaseUserPrompt(chunkDiff, files, c.MaxFindings, maxPerFile, c.FailOn, r)
+	}
+	prompt := promptFingerprint(codebaseBuilder, cfg.Config, rules)
+
 	// Step 4: Check each section against the per-file cache.
 	for _, section := range sections {
-		key := cache.BuildCacheKey(cfg.Provider, cfg.Model, section)
+		key := fileCacheKey(cfg.Provider, cfg.Model, prompt, section)
 		if cached, ok := reviewCache.Get(key); ok {
 			parsed, err := parseFindings(cached)
 			if err == nil {
@@ -406,11 +439,6 @@ func runCodebaseWithFileCache(
 			return nil, fmt.Errorf("creating provider: %w", err)
 		}
 
-		maxPerFile := cfg.MaxFindingsPerFile
-		codebaseBuilder := func(chunkDiff string, files []string, c config.Config, r *Rules) (string, string) {
-			return CodebaseSystemPrompt(), BuildCodebaseUserPrompt(chunkDiff, files, c.MaxFindings, maxPerFile, c.FailOn, r)
-		}
-
 		chunks := SplitIntoChunks(filteredDiff, cfg.ChunkBytes)
 		cov.Chunks = len(chunks)
 		var err2 error
@@ -420,7 +448,7 @@ func runCodebaseWithFileCache(
 		}
 
 		// Step 8: Store fresh findings per file for future cache hits (FR-4).
-		storeFindingsPerFile(reviewCache, uncachedSections, freshFindings, cfg.Provider, cfg.Model)
+		storeFindingsPerFile(reviewCache, uncachedSections, freshFindings, cfg.Provider, cfg.Model, prompt)
 	}
 
 	// Step 9: Merge cached and fresh findings.
@@ -456,9 +484,9 @@ func runCodebaseWithFileCache(
 }
 
 // storeFindingsPerFile stores fresh LLM findings into the cache at per-file
-// granularity. Each section gets its own cache entry keyed on
-// hash(provider, model, sectionText) so only the changed file is a miss on
-// the next run.
+// granularity. Each section gets its own cache entry keyed by fileCacheKey
+// (provider, model, prompt fingerprint and section text) so only the changed
+// file is a miss on the next run.
 //
 // If ANY finding in the batch has no primary path the entire batch is left
 // uncached — we cannot attribute unattributable findings to a specific file,
@@ -466,7 +494,7 @@ func runCodebaseWithFileCache(
 // reports (FR-4, plan Design Decisions).
 //
 // All write errors are silently ignored (FR-7).
-func storeFindingsPerFile(reviewCache *cache.Cache, sections []string, findings []Finding, provider, model string) {
+func storeFindingsPerFile(reviewCache *cache.Cache, sections []string, findings []Finding, provider, model, prompt string) {
 	// Guard: if any finding lacks a primary path, skip the entire batch.
 	for _, f := range findings {
 		if len(f.Locations) == 0 || f.Locations[0].Path == "" {
@@ -488,7 +516,7 @@ func storeFindingsPerFile(reviewCache *cache.Cache, sections []string, findings 
 		if path == "" {
 			continue
 		}
-		key := cache.BuildCacheKey(provider, model, section)
+		key := fileCacheKey(provider, model, prompt, section)
 		raw := findingsToRaw(byPath[path]) // nil slice marshals as JSON []
 		data, err := json.Marshal(raw)
 		if err != nil {
