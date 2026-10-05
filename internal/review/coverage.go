@@ -32,6 +32,9 @@ type Coverage struct {
 	// CachedChunks is how many of Chunks were replayed from cache instead of
 	// sent to a model. It equals Chunks on a full cache hit.
 	CachedChunks int `json:"cachedChunks"`
+	// Tokens is what the review's model calls used, by model, with an
+	// estimated cost where the price is known. Empty when nothing was sent.
+	Tokens []TokenUsage `json:"tokens"`
 	// Splits counts parts halved and reviewed again because a model's
 	// response was cut off at its output limit.
 	Splits int `json:"splits,omitempty"`
@@ -90,6 +93,9 @@ func (c *Coverage) Finalize() {
 	if c.Excluded == nil {
 		c.Excluded = []gitctx.Excluded{}
 	}
+	if c.Tokens == nil {
+		c.Tokens = []TokenUsage{}
+	}
 	c.Complete = c.TruncatedBytes == 0 && len(c.Skipped) == 0
 }
 
@@ -107,6 +113,7 @@ func (c *Coverage) Add(o Coverage, first bool) {
 	c.LLMCalls += o.LLMCalls
 	c.CachedChunks += o.CachedChunks
 	c.Splits += o.Splits
+	c.Tokens = mergeTokens(c.Tokens, o.Tokens)
 	c.Excluded = append(c.Excluded, o.Excluded...)
 	if c.Fallback == nil {
 		c.Fallback = o.Fallback

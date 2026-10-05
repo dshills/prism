@@ -125,6 +125,8 @@ func (g *Gemini) review(ctx context.Context, req ReviewRequest, structured bool)
 			return fmt.Errorf("parsing response: %w", err)
 		}
 
+		// Recorded before any check, so a cut-off answer reports its tokens.
+		resp = ReviewResponse{Provider: g.Name(), Model: g.model, Usage: result.UsageMetadata.usage()}
 		if len(result.Candidates) > 0 && result.Candidates[0].FinishReason == "MAX_TOKENS" {
 			return &truncatedError{maxTokens: body.GenerationConfig.MaxOutputTokens}
 		}
@@ -140,12 +142,8 @@ func (g *Gemini) review(ctx context.Context, req ReviewRequest, structured bool)
 			return fmt.Errorf("empty text content in API response")
 		}
 
-		resp = ReviewResponse{
-			Content:    content,
-			TokensUsed: result.UsageMetadata.TotalTokenCount,
-			Provider:   g.Name(),
-			Model:      g.model,
-		}
+		resp.Content = content
+		resp.TokensUsed = result.UsageMetadata.TotalTokenCount
 		return nil
 	})
 
@@ -188,5 +186,19 @@ type geminiCandidate struct {
 }
 
 type geminiUsage struct {
-	TotalTokenCount int `json:"totalTokenCount"`
+	PromptTokenCount        int `json:"promptTokenCount"`
+	CandidatesTokenCount    int `json:"candidatesTokenCount"` // visible output only
+	ThoughtsTokenCount      int `json:"thoughtsTokenCount"`
+	CachedContentTokenCount int `json:"cachedContentTokenCount"`
+	TotalTokenCount         int `json:"totalTokenCount"`
+}
+
+// usage counts thinking as output, as it is billed.
+func (u geminiUsage) usage() Usage {
+	return Usage{
+		InputTokens:       u.PromptTokenCount,
+		OutputTokens:      u.CandidatesTokenCount + u.ThoughtsTokenCount,
+		ReasoningTokens:   u.ThoughtsTokenCount,
+		CachedInputTokens: u.CachedContentTokenCount,
+	}
 }

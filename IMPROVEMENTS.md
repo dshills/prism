@@ -22,7 +22,7 @@ Prism is run by AI coding agents (Claude Code, Codex), not by people at a termin
 | 9 | Delta mode: net-new findings | Workflow | High | **Done** |
 | 10 | Skip content not worth reviewing | Tokens, Speed | High | **Done** |
 | 11 | Detect truncated responses | Accuracy, Tokens | High | **Done** |
-| 12 | Token usage reporting | Tokens | Medium | Not started |
+| 12 | Token usage reporting | Tokens | Medium | **Done** |
 | 13 | Function context around hunks | Accuracy | Medium | Not started |
 | 14 | Compare mode on the full pipeline | Accuracy, Speed, Tokens | Medium | Not started |
 | 15 | Severity floor in the prompt | Tokens, Speed | Medium | Not started |
@@ -271,7 +271,13 @@ A deleted file has no post-image lines, so no finding on it can pass evidence ve
 
 ## 🟧 Medium Impact
 
-### 12. Token usage reporting
+### 12. Token usage reporting (DONE)
+
+**Status:** Done.
+- **Provider usage:** providers return `Usage{input, output, reasoning, cachedInput}`, normalized across APIs. Anthropic's input adds cache reads and writes, Gemini's output adds thinking tokens, and OpenAI's comes from the `*_details` fields. It's recorded even for cut-off responses.
+- **In the report:** usage is summed per model (a fallback can mix models) over every call, including repairs and halves, into `coverage.tokens`. Per-commit reviews merge by model.
+- **Cost:** `costUSD` estimates from built-in Claude prices (Anthropic's rates as of 2026-09-25, dated snapshots priced as their model), a free Ollama, and the `prices` config map for everything else, which also overrides built-ins. Text and markdown print `Tokens: N in (… cached) / N out (… reasoning) — ~$X`, with the cost only when every model is priced.
+- **Not covered:** compare mode doesn't record usage yet (#14).
 
 **Problem:** Every provider fills in `ReviewResponse.TokensUsed`, but prism never reports it. It's also a single input-plus-output sum, which loses the split; output tokens cost several times more than input tokens. Without these numbers, none of the token-reduction items here (#2, #10, #15, #19, #20, #23) can be measured.
 

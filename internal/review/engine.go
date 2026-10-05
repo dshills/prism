@@ -239,6 +239,8 @@ func reviewWholeCached(ctx context.Context, redactedDiff string, files []string,
 	res, err := pr.review(ctx, part{diff: redactedDiff, files: files}, 0)
 	cov.LLMCalls += res.calls
 	cov.Splits += res.splits
+	cov.Tokens = res.usage.list()
+	priceTokens(cov.Tokens, cfg.Prices)
 	if err != nil {
 		return nil, res.llmMs, fmt.Errorf("provider review: %w", err)
 	}
@@ -286,6 +288,8 @@ func reviewChunksCached(ctx context.Context, chunks []Chunk, cfg config.Config, 
 	noteFallback(cov, provider)
 	cov.LLMCalls = run.calls
 	cov.Splits = run.splits
+	cov.Tokens = run.usage.list()
+	priceTokens(cov.Tokens, cfg.Prices)
 	haveResults := cov.CachedChunks > 0
 	for _, i := range todo {
 		if run.errs[i] == nil {
@@ -547,6 +551,8 @@ func runCodebaseWithFileCache(
 		run := reviewChunks(ctx, chunks, nil, provider, cfg.Config, rules, codebaseBuilder)
 		noteFallback(&cov, provider)
 		llmMs, cov.LLMCalls, cov.Splits = run.llmMs, run.calls, run.splits
+		cov.Tokens = run.usage.list()
+		priceTokens(cov.Tokens, cfg.Prices)
 		perChunk, errs := run.findings, run.errs
 
 		// Step 8: Store fresh findings per file for future cache hits (FR-4),

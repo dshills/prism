@@ -130,6 +130,8 @@ func (o *OpenAI) review(ctx context.Context, req ReviewRequest, structured bool)
 			return fmt.Errorf("parsing response: %w", err)
 		}
 
+		// Recorded before any check, so a cut-off answer reports its tokens.
+		resp = ReviewResponse{Provider: o.Name(), Model: o.model, Usage: result.Usage.usage()}
 		if len(result.Choices) == 0 {
 			return fmt.Errorf("no choices in response")
 		}
@@ -140,12 +142,8 @@ func (o *OpenAI) review(ctx context.Context, req ReviewRequest, structured bool)
 			return fmt.Errorf("empty text content in API response")
 		}
 
-		resp = ReviewResponse{
-			Content:    result.Choices[0].Message.Content,
-			TokensUsed: result.Usage.TotalTokens,
-			Provider:   o.Name(),
-			Model:      o.model,
-		}
+		resp.Content = result.Choices[0].Message.Content
+		resp.TokensUsed = result.Usage.TotalTokens
 		return nil
 	})
 
@@ -259,5 +257,22 @@ type openaiChoice struct {
 }
 
 type openaiUsage struct {
-	TotalTokens int `json:"total_tokens"`
+	PromptTokens        int `json:"prompt_tokens"`
+	CompletionTokens    int `json:"completion_tokens"` // reasoning included
+	TotalTokens         int `json:"total_tokens"`
+	PromptTokensDetails struct {
+		CachedTokens int `json:"cached_tokens"`
+	} `json:"prompt_tokens_details"`
+	CompletionTokensDetails struct {
+		ReasoningTokens int `json:"reasoning_tokens"`
+	} `json:"completion_tokens_details"`
+}
+
+func (u openaiUsage) usage() Usage {
+	return Usage{
+		InputTokens:       u.PromptTokens,
+		OutputTokens:      u.CompletionTokens,
+		ReasoningTokens:   u.CompletionTokensDetails.ReasoningTokens,
+		CachedInputTokens: u.PromptTokensDetails.CachedTokens,
+	}
 }

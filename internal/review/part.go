@@ -36,9 +36,11 @@ type partResult struct {
 	calls    int   // model calls, repairs and halves included
 	llmMs    int64 // time spent waiting on the model
 	splits   int   // times a part was halved after a cut-off response
+	usage    usageLedger
 }
 
 func (r *partResult) add(o partResult) {
+	r.usage.merge(o.usage)
 	r.findings = append(r.findings, o.findings...)
 	r.fallback = r.fallback || o.fallback
 	r.calls += o.calls
@@ -111,6 +113,7 @@ func (r *partReviewer) ask(ctx context.Context, p part, maxTokens int) (partResu
 	})
 	res.llmMs += time.Since(start).Milliseconds()
 	res.calls += providers.CallsOf(resp)
+	res.usage.add(resp.Provider, resp.Model, resp.Usage) // a cut-off answer still cost tokens
 	if err != nil {
 		return res, err
 	}
@@ -130,6 +133,7 @@ func (r *partReviewer) ask(ctx context.Context, p part, maxTokens int) (partResu
 		})
 		res.llmMs += time.Since(start).Milliseconds()
 		res.calls += providers.CallsOf(resp2)
+		res.usage.add(resp2.Provider, resp2.Model, resp2.Usage)
 		if err2 != nil {
 			return res, fmt.Errorf("repair: %w", err2)
 		}

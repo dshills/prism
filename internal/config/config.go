@@ -38,11 +38,21 @@ type Config struct {
 	// repository root unless absolute. Empty means .prism-baseline.json;
 	// "none" turns the baseline off.
 	BaselineFile string `json:"baselineFile,omitempty"`
+	// Prices sets models' prices for the cost estimate, keyed by
+	// "provider:model", in US dollars per million tokens. They add to and
+	// override prism's built-in prices.
+	Prices map[string]Price `json:"prices,omitempty"`
 	// Fallback is a "provider:model" to review with when the primary
 	// provider fails (auth, retries exhausted, unreachable). Empty: none.
 	Fallback string        `json:"fallback,omitempty"`
 	Cache    CacheConfig   `json:"cache"`
 	Privacy  PrivacyConfig `json:"privacy"`
+}
+
+// Price is a model's price in US dollars per million tokens.
+type Price struct {
+	Input  float64 `json:"input"`
+	Output float64 `json:"output"`
 }
 
 // CacheConfig controls caching behavior.
@@ -223,6 +233,9 @@ func mergeFile(dst *Config, src Config) {
 	}
 	if src.Fallback != "" {
 		dst.Fallback = src.Fallback
+	}
+	if len(src.Prices) > 0 {
+		dst.Prices = src.Prices
 	}
 	if src.Cache.Dir != "" {
 		dst.Cache.Dir = src.Cache.Dir

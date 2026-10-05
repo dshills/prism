@@ -266,6 +266,7 @@ Example `config.json`:
   "baselineFile": "",
   "fallback": "",
   "autoExclude": true,
+  "prices": {},
   "cache": {
     "enabled": true,
     "dir": "",
@@ -389,6 +390,18 @@ prism review staged --rules rules.json
 ### Structured Output
 
 Prism asks every provider for its findings in the provider's structured-output mode, constrained to a JSON schema: `response_format` for OpenAI (and OpenAI-compatible servers through the `ollama` provider), `output_config.format` for Anthropic, and `responseSchema` for Gemini. Responses are therefore always valid JSON with valid severities and categories, and the repair call for malformed output is rarely needed. An endpoint that doesn't support it is detected on its first refusal and asked in plain JSON from then on. The live check is `go test -tags integration -run TestStructuredOutputLive ./internal/review`.
+
+### Token Usage and Cost
+
+Every report includes what the review cost in tokens, by model, under `coverage.tokens`: input (including any read from a prompt cache), output (including hidden reasoning), and the cached and reasoning parts where the provider reports them. Text and markdown add a footer line such as `Tokens: 12,400 in (8,000 cached) / 1,830 out (900 reasoning) — ~$0.06`.
+
+The cost is an estimate, shown only when every model's price is known. Cached input is counted at the full input price, so it's an upper bound. Claude models have built-in prices (Anthropic's API rates as of 2026-09-25), and Ollama is free. Set others, or override a built-in price, in US dollars per million tokens:
+
+```json
+{ "prices": { "openai:gpt-6.1-sol": { "input": 3.0, "output": 12.0 } } }
+```
+
+Cut-off responses and repair calls count too. A run replayed entirely from cache used no tokens.
 
 ### Cut-off Responses
 

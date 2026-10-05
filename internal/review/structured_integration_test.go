@@ -73,8 +73,11 @@ func TestStructuredOutputLive(t *testing.T) {
 					applicable++
 				}
 			}
-			t.Logf("%s/%s: %d finding(s), %d with a fix, %d applicable as exact replacements, %d tokens",
-				tc.provider, tc.model, len(findings), withFix, applicable, resp.TokensUsed)
+			t.Logf("%s/%s: %d finding(s), %d with a fix, %d applicable as exact replacements, usage %+v",
+				tc.provider, tc.model, len(findings), withFix, applicable, resp.Usage)
+			if resp.Usage.InputTokens == 0 || resp.Usage.OutputTokens == 0 {
+				t.Errorf("usage = %+v, want input and output counted", resp.Usage)
+			}
 			for _, f := range findings {
 				if f.Severity != SeverityLow && f.Severity != SeverityMedium && f.Severity != SeverityHigh {
 					t.Errorf("severity %q outside the schema's enum", f.Severity)

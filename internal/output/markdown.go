@@ -30,6 +30,9 @@ func (m *MarkdownWriter) Write(w io.Writer, report *review.Report) error {
 	if line := report.Coverage.Describe(report.Timing.LLMMs); line != "" {
 		ew.printf("_%s_\n\n", line)
 	}
+	if line := report.Coverage.TokensLine(); line != "" {
+		ew.printf("_%s_\n\n", line)
+	}
 	if line := report.Coverage.ExcludedLine(); line != "" {
 		ew.printf("_%s_\n\n", line)
 	}

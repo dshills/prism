@@ -131,6 +131,8 @@ func (o *Ollama) review(ctx context.Context, req ReviewRequest, structured bool)
 			return fmt.Errorf("parsing response: %w", err)
 		}
 
+		// Recorded before any check, so a cut-off answer reports its tokens.
+		resp = ReviewResponse{Provider: o.Name(), Model: o.model, Usage: result.Usage.usage()}
 		if len(result.Choices) == 0 {
 			return fmt.Errorf("no choices in response")
 		}
@@ -141,12 +143,8 @@ func (o *Ollama) review(ctx context.Context, req ReviewRequest, structured bool)
 			return fmt.Errorf("empty text content in API response")
 		}
 
-		resp = ReviewResponse{
-			Content:    result.Choices[0].Message.Content,
-			TokensUsed: result.Usage.TotalTokens,
-			Provider:   o.Name(),
-			Model:      o.model,
-		}
+		resp.Content = result.Choices[0].Message.Content
+		resp.TokensUsed = result.Usage.TotalTokens
 		return nil
 	})
 

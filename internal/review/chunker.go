@@ -217,6 +217,7 @@ type chunkRun struct {
 	llmMs    int64
 	calls    int
 	splits   int // parts halved after a cut-off response
+	usage    usageLedger
 }
 
 // reviewChunks reviews chunks in parallel and returns each chunk's findings
@@ -271,6 +272,7 @@ func reviewChunks(ctx context.Context, chunks []Chunk, todo []int, provider prov
 			run.llmMs += res.llmMs
 			run.calls += res.calls
 			run.splits += res.splits
+			run.usage.merge(res.usage)
 			mu.Unlock()
 			if err != nil {
 				errs[i] = err

@@ -122,6 +122,8 @@ func (a *Anthropic) review(ctx context.Context, req ReviewRequest, structured bo
 			return fmt.Errorf("parsing response: %w", err)
 		}
 
+		// Recorded before any check, so a cut-off answer reports its tokens.
+		resp = ReviewResponse{Provider: a.Name(), Model: a.model, Usage: result.Usage.usage()}
 		if result.StopReason == "max_tokens" {
 			return &truncatedError{maxTokens: maxTokens}
 		}
@@ -135,12 +137,8 @@ func (a *Anthropic) review(ctx context.Context, req ReviewRequest, structured bo
 			return fmt.Errorf("empty text content in API response")
 		}
 
-		resp = ReviewResponse{
-			Content:    content,
-			TokensUsed: result.Usage.InputTokens + result.Usage.OutputTokens,
-			Provider:   a.Name(),
-			Model:      a.model,
-		}
+		resp.Content = content
+		resp.TokensUsed = resp.Usage.InputTokens + resp.Usage.OutputTokens
 		return nil
 	})
 
@@ -183,6 +181,17 @@ type anthropicBlock struct {
 }
 
 type anthropicUsage struct {
-	InputTokens  int `json:"input_tokens"`
-	OutputTokens int `json:"output_tokens"`
+	InputTokens              int `json:"input_tokens"` // uncached input only
+	OutputTokens             int `json:"output_tokens"`
+	CacheReadInputTokens     int `json:"cache_read_input_tokens"`
+	CacheCreationInputTokens int `json:"cache_creation_input_tokens"`
+}
+
+// usage counts all input, cached or not, as InputTokens.
+func (u anthropicUsage) usage() Usage {
+	return Usage{
+		InputTokens:       u.InputTokens + u.CacheReadInputTokens + u.CacheCreationInputTokens,
+		OutputTokens:      u.OutputTokens,
+		CachedInputTokens: u.CacheReadInputTokens,
+	}
 }
