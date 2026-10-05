@@ -22,6 +22,10 @@ type DiffOptions struct {
 	MaxDiffBytes int
 	Include      []string
 	Exclude      []string
+	// FunctionContext widens each hunk to its whole enclosing function
+	// (git diff --function-context), file by file within a growth limit,
+	// so the model sees the signature and the code around a change.
+	FunctionContext bool
 	// NoAutoExclude keeps the files prism's own rules would leave out
 	// (lockfiles, generated code, deletions; see autoExclude).
 	NoAutoExclude bool
@@ -37,6 +41,9 @@ type DiffResult struct {
 	// TruncatedBytes is how many bytes of the diff were cut at MaxDiffBytes
 	// and so were never reviewed (0 when the diff fit).
 	TruncatedBytes int
+	// WidenedFiles counts the files whose hunks were widened to their
+	// enclosing function (DiffOptions.FunctionContext).
+	WidenedFiles int
 	// Excluded lists the files prism's own rules left out of the diff, and
 	// why. Leaving them out is policy, not a gap: the review is still
 	// complete.
@@ -117,38 +124,41 @@ func GetRepoMeta(ctx context.Context) (RepoMeta, error) {
 
 // Unstaged returns the diff of working tree vs index.
 func Unstaged(ctx context.Context, opts DiffOptions) (DiffResult, error) {
-	args := buildDiffArgs(opts)
-	diff, err := gitOutputCtx(ctx, append([]string{"diff"}, args...)...)
+	diff, widened, err := gitDiff(ctx, []string{"diff"}, opts)
 	if err != nil {
 		return DiffResult{}, fmt.Errorf("git diff: %w", err)
 	}
-	return buildResult(ctx, diff, "unstaged", "", opts)
+	r, err := buildResult(ctx, diff, "unstaged", "", opts)
+	r.WidenedFiles = widened
+	return r, err
 }
 
 // Staged returns the diff of index vs HEAD.
 func Staged(ctx context.Context, opts DiffOptions) (DiffResult, error) {
-	args := buildDiffArgs(opts)
-	diff, err := gitOutputCtx(ctx, append([]string{"diff", "--cached"}, args...)...)
+	diff, widened, err := gitDiff(ctx, []string{"diff", "--cached"}, opts)
 	if err != nil {
 		return DiffResult{}, fmt.Errorf("git diff --cached: %w", err)
 	}
-	return buildResult(ctx, diff, "staged", "", opts)
+	r, err := buildResult(ctx, diff, "staged", "", opts)
+	r.WidenedFiles = widened
+	return r, err
 }
 
 // Commit returns the diff for a specific commit vs its parent.
 func Commit(ctx context.Context, sha string, parent string, opts DiffOptions) (DiffResult, error) {
 	args := buildDiffArgs(opts)
 	if parent != "" {
-		cmdArgs := append([]string{"diff", parent, sha}, args...)
-		diff, err := gitOutputCtx(ctx, cmdArgs...)
+		diff, widened, err := gitDiff(ctx, []string{"diff", parent, sha}, opts)
 		if err != nil {
 			return DiffResult{}, fmt.Errorf("git diff %s %s: %w", parent, sha, err)
 		}
-		return buildResult(ctx, diff, "commit", sha, opts)
+		r, err := buildResult(ctx, diff, "commit", sha, opts)
+		r.WidenedFiles = widened
+		return r, err
 	}
-	cmdArgs := append([]string{"diff", sha + "~1", sha}, args...)
-	diff, err := gitOutputCtx(ctx, cmdArgs...)
+	diff, widened, err := gitDiff(ctx, []string{"diff", sha + "~1", sha}, opts)
 	if err != nil {
+		widened = 0
 		// Might be initial commit, try show
 		showArgs := append([]string{"show", "--format=", sha, "--"}, args[1:]...) // skip -U flag reuse
 		diff, err = gitOutputCtx(ctx, showArgs...)
@@ -156,22 +166,24 @@ func Commit(ctx context.Context, sha string, parent string, opts DiffOptions) (D
 			return DiffResult{}, fmt.Errorf("git show %s: %w", sha, err)
 		}
 	}
-	return buildResult(ctx, diff, "commit", sha, opts)
+	r, err := buildResult(ctx, diff, "commit", sha, opts)
+	r.WidenedFiles = widened
+	return r, err
 }
 
 // Range returns the combined diff for a revision range.
 func Range(ctx context.Context, revRange string, mergeBase bool, opts DiffOptions) (DiffResult, error) {
-	args := buildDiffArgs(opts)
 	diffRange := revRange
 	if mergeBase && strings.Contains(revRange, "..") && !strings.Contains(revRange, "...") {
 		diffRange = strings.Replace(revRange, "..", "...", 1)
 	}
-	cmdArgs := append([]string{"diff", diffRange}, args...)
-	diff, err := gitOutputCtx(ctx, cmdArgs...)
+	diff, widened, err := gitDiff(ctx, []string{"diff", diffRange}, opts)
 	if err != nil {
 		return DiffResult{}, fmt.Errorf("git diff %s: %w", revRange, err)
 	}
-	return buildResult(ctx, diff, "range", revRange, opts)
+	r, err := buildResult(ctx, diff, "range", revRange, opts)
+	r.WidenedFiles = widened
+	return r, err
 }
 
 // Snippet wraps raw content as a "diff" for review. If base is provided, computes a real diff.

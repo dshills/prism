@@ -35,6 +35,9 @@ type Coverage struct {
 	// Tokens is what the review's model calls used, by model, with an
 	// estimated cost where the price is known. Empty when nothing was sent.
 	Tokens []TokenUsage `json:"tokens"`
+	// WidenedFiles counts the files whose hunks were widened to their
+	// enclosing function (functionContext).
+	WidenedFiles int `json:"widenedFiles,omitempty"`
 	// Splits counts parts halved and reviewed again because a model's
 	// response was cut off at its output limit.
 	Splits int `json:"splits,omitempty"`
@@ -113,6 +116,7 @@ func (c *Coverage) Add(o Coverage, first bool) {
 	c.LLMCalls += o.LLMCalls
 	c.CachedChunks += o.CachedChunks
 	c.Splits += o.Splits
+	c.WidenedFiles += o.WidenedFiles
 	c.Tokens = mergeTokens(c.Tokens, o.Tokens)
 	c.Excluded = append(c.Excluded, o.Excluded...)
 	if c.Fallback == nil {

@@ -28,6 +28,8 @@ func resetFlags() {
 	flagRules = ""
 	flagBaseline = ""
 	flagFallback = ""
+	flagNoAutoExclude = false
+	flagNoFunctionContext = false
 	flagSince, flagOnlyNew, priorReview = "", false, nil
 	flagNoRedact = false
 	flagParent = ""

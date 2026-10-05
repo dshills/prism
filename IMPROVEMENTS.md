@@ -23,7 +23,7 @@ Prism is run by AI coding agents (Claude Code, Codex), not by people at a termin
 | 10 | Skip content not worth reviewing | Tokens, Speed | High | **Done** |
 | 11 | Detect truncated responses | Accuracy, Tokens | High | **Done** |
 | 12 | Token usage reporting | Tokens | Medium | **Done** |
-| 13 | Function context around hunks | Accuracy | Medium | Not started |
+| 13 | Function context around hunks | Accuracy | Medium | **Done** |
 | 14 | Compare mode on the full pipeline | Accuracy, Speed, Tokens | Medium | Not started |
 | 15 | Severity floor in the prompt | Tokens, Speed | Medium | Not started |
 | 16 | Low-temperature sampling | Accuracy | Medium | Not started |
@@ -289,7 +289,14 @@ A deleted file has no post-image lines, so no finding on it can pass evidence ve
 
 ---
 
-### 13. Function context around hunks
+### 13. Function context around hunks (DONE)
+
+**Status:** Done (`internal/gitctx/funccontext.go`).
+- **How:** diff modes run git twice, plain and with `--function-context`, and take each file's widened section unless it grows more than `max(4 KB, 3×)` over the plain one. That's per file rather than "whole diff fits in a chunk", so one long function can't switch the context off for everything else. If the widened run fails, the plain diff stands.
+- **Settings:** on by default (`functionContext`, `--no-function-context`, `PRISM_FUNCTION_CONTEXT`), and `coverage.widenedFiles` counts the widened files.
+- **Measured:** on this repo's last 12 commits (146 file diffs), the input went from 436 KB to 632 KB, 1.4×; unlimited widening would be 1.6×. 92 files were widened.
+- **Not yet measured:** the accuracy gain, meaning the drop in discarded and false-positive findings, needs a set of live reviews to compare.
+- **No changes needed elsewhere:** fingerprints already anchor on the enclosing declaration from the hunk or its header, and evidence checks use post-image lines.
 
 **Problem:** The default `contextLines` is 3. The model sees three lines around each change, but not the enclosing function's signature, its receiver or the variables in scope. That's where many false positives ("err is not checked", "x may be nil") and missed bugs come from.
 

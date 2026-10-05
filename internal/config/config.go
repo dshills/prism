@@ -30,10 +30,13 @@ type Config struct {
 	// AutoExclude leaves out files not worth reviewing (lockfiles, generated
 	// code, minified assets, snapshots, deletions). nil means the default,
 	// true.
-	AutoExclude    *bool  `json:"autoExclude,omitempty"`
-	MaxConcurrency int    `json:"maxConcurrency,omitempty"`
-	RateLimitRPM   int    `json:"rateLimitRpm,omitempty"`
-	RulesFile      string `json:"rulesFile,omitempty"`
+	AutoExclude *bool `json:"autoExclude,omitempty"`
+	// FunctionContext widens each hunk to its whole enclosing function, file
+	// by file within a growth limit. nil means the default, true.
+	FunctionContext *bool  `json:"functionContext,omitempty"`
+	MaxConcurrency  int    `json:"maxConcurrency,omitempty"`
+	RateLimitRPM    int    `json:"rateLimitRpm,omitempty"`
+	RulesFile       string `json:"rulesFile,omitempty"`
 	// BaselineFile is the baseline of accepted findings, relative to the
 	// repository root unless absolute. Empty means .prism-baseline.json;
 	// "none" turns the baseline off.
@@ -219,6 +222,10 @@ func mergeFile(dst *Config, src Config) {
 		v := *src.AutoExclude
 		dst.AutoExclude = &v
 	}
+	if src.FunctionContext != nil {
+		v := *src.FunctionContext
+		dst.FunctionContext = &v
+	}
 	if src.MaxConcurrency > 0 {
 		dst.MaxConcurrency = src.MaxConcurrency
 	}
@@ -297,6 +304,13 @@ func mergeEnv(cfg *Config) error {
 		}
 		cfg.VerifyFindings = &b
 	}
+	if v := os.Getenv("PRISM_FUNCTION_CONTEXT"); v != "" {
+		b, err := strconv.ParseBool(v)
+		if err != nil {
+			return fmt.Errorf("PRISM_FUNCTION_CONTEXT must be true or false, got %q", v)
+		}
+		cfg.FunctionContext = &b
+	}
 	if v := os.Getenv("PRISM_AUTO_EXCLUDE"); v != "" {
 		b, err := strconv.ParseBool(v)
 		if err != nil {
@@ -359,6 +373,11 @@ func mergeOverrides(cfg *Config, overrides map[string]string) {
 			cfg.MaxDiffBytes = n
 		}
 	}
+	if v, ok := overrides["functionContext"]; ok && v != "" {
+		if b, err := strconv.ParseBool(v); err == nil {
+			cfg.FunctionContext = &b
+		}
+	}
 	if v, ok := overrides["autoExclude"]; ok && v != "" {
 		if b, err := strconv.ParseBool(v); err == nil {
 			cfg.AutoExclude = &b
@@ -417,6 +436,12 @@ func SetField(cfg *Config, key, value string) error {
 			return fmt.Errorf("maxDiffBytes must be an integer: %w", err)
 		}
 		cfg.MaxDiffBytes = n
+	case "functionContext":
+		b, err := strconv.ParseBool(value)
+		if err != nil {
+			return fmt.Errorf("functionContext must be true or false: %w", err)
+		}
+		cfg.FunctionContext = &b
 	case "autoExclude":
 		b, err := strconv.ParseBool(value)
 		if err != nil {
@@ -451,6 +476,12 @@ func SetField(cfg *Config, key, value string) error {
 // before being reported; true unless explicitly turned off.
 func (c Config) ShouldVerifyFindings() bool {
 	return c.VerifyFindings == nil || *c.VerifyFindings
+}
+
+// ShouldFunctionContext reports whether hunks are widened to their
+// enclosing functions; true unless explicitly turned off.
+func (c Config) ShouldFunctionContext() bool {
+	return c.FunctionContext == nil || *c.FunctionContext
 }
 
 // ShouldAutoExclude reports whether files not worth reviewing are left out;

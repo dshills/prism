@@ -195,6 +195,7 @@ All review subcommands accept these flags:
 | `--paths` | Include file path globs (comma-separated) | `**/*` |
 | `--exclude` | Exclude file path globs (comma-separated) | `vendor/**`, `**/*.gen.go`, `**/dist/**` |
 | `--rules` | Rules file path | |
+| `--no-function-context` | Keep plain hunks instead of widening them to their enclosing functions | `false` |
 | `--no-auto-exclude` | Review lockfiles, generated code, minified assets, snapshots and deletions too | `false` |
 | `--since` | Compare with an earlier review: a prism JSON report, a SARIF log, or `last` (this repo's last review) | |
 | `--only-new` | With `--since`, report only new findings; they alone decide the exit code | `false` |
@@ -266,6 +267,7 @@ Example `config.json`:
   "baselineFile": "",
   "fallback": "",
   "autoExclude": true,
+  "functionContext": true,
   "prices": {},
   "cache": {
     "enabled": true,
@@ -292,6 +294,7 @@ Example `config.json`:
 | `PRISM_CHUNK_BYTES` | `chunkBytes` — target size of each review chunk (default 24000). One prompt carrying a large diff gets a shallow review, so keep this small |
 | `PRISM_MAX_CONCURRENCY` | `maxConcurrency` — parallel LLM calls per review (0 = provider default) |
 | `PRISM_RATE_LIMIT_RPM` | `rateLimitRpm` — requests per minute cap (0 = provider default) |
+| `PRISM_FUNCTION_CONTEXT` | `functionContext` — widen hunks to their enclosing functions (default true) |
 | `PRISM_AUTO_EXCLUDE` | `autoExclude` — leave out files not worth reviewing (default true) |
 | `PRISM_FALLBACK` | `fallback` — `provider:model` used when the primary provider fails |
 | `PRISM_BASELINE_FILE` | `baselineFile` — baseline path, relative to the repo root (`none` turns it off) |
@@ -328,6 +331,12 @@ The comment must start with `prism:ignore`, right after a comment opener of the 
 In a language with multi-line strings or block comments (most of them), a hunk below the top of a file might begin inside a string or comment. Prism then lexes the whole file instead: the working tree, the index or the reviewed revision, whichever the review mode used. Where that file can't be read or doesn't match the diff (a GitHub PR review, for example), directives in such hunks are not honored. The finding is reported, and the baseline still works.
 
 Finding directives is best-effort. The lexer knows each language's comments and common string forms, but not every one. Rust raw and multi-line strings, YAML block scalars, and heredocs (shell, Ruby, Perl, PHP) aren't modeled, so text shaped like a directive inside them is taken as one. Anyone who can write such a string can also add a real comment, so this isn't a new way to suppress a finding, only a rare accident. When suppression has to be exact, use the baseline.
+
+## Function Context
+
+A plain diff shows three lines around each change, not the function it's in. The model can't see the signature, the receiver or the variables in scope, and that's where many false positives ("err is not checked", "x may be nil") and missed bugs come from. Prism widens each hunk to its whole enclosing function (`git diff --function-context`). It does this file by file, keeping a file's plain hunks when widening would grow it more than 3× or 4 KB beyond the plain diff, whichever allows more, so one change inside a very long function can't bloat the review. `coverage.widenedFiles` counts the widened files.
+
+It costs input tokens: on this repository's recent history the diffs grow about 1.4× (unlimited widening would be 1.6×). Turn it off with `functionContext: false` or `--no-function-context`. It applies to `unstaged`, `staged`, `commit` and `range`; snippets and codebase reviews already show whole files.
 
 ## Files Left Out
 

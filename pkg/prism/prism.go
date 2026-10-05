@@ -261,6 +261,8 @@ func diffFromOptions(ctx context.Context, opts ReviewOptions, cfg config.Config)
 		Exclude:      cfg.Exclude,
 		// Prism's own exclusion rules (lockfiles, generated code, ...).
 		NoAutoExclude: !cfg.ShouldAutoExclude(),
+		// Widen hunks to their enclosing functions.
+		FunctionContext: cfg.ShouldFunctionContext(),
 	}
 	mode := opts.Mode
 	if mode == "" {
@@ -362,6 +364,8 @@ func runPerCommit(ctx context.Context, opts ReviewOptions, cfg config.Config) (*
 			Exclude:      cfg.Exclude,
 			// Prism's own exclusion rules (lockfiles, generated code, ...).
 			NoAutoExclude: !cfg.ShouldAutoExclude(),
+			// Widen hunks to their enclosing functions.
+			FunctionContext: cfg.ShouldFunctionContext(),
 		}
 		for _, commit := range commits {
 			shortSHA := commit.SHA

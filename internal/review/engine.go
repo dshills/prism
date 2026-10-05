@@ -149,6 +149,7 @@ func reviewPipeline(ctx context.Context, diff gitctx.DiffResult, cfg config.Conf
 	// FR-1: coverage is recorded for every outcome, including an empty diff.
 	cov := NewCoverage(ConfigReviewer(cfg.Provider, cfg.Model), len(diff.Files), diff.ReviewedBytes(), diff.TruncatedBytes)
 	cov.Excluded = diff.Excluded
+	cov.WidenedFiles = diff.WidenedFiles
 
 	if strings.TrimSpace(redactedDiff) == "" {
 		return emptyReport(diff, startTime, cov), nil
@@ -505,6 +506,7 @@ func runCodebaseWithFileCache(
 
 	cov := NewCoverage(ConfigReviewer(cfg.Provider, cfg.Model), len(diff.Files), diff.ReviewedBytes(), diff.TruncatedBytes)
 	cov.Excluded = diff.Excluded
+	cov.WidenedFiles = diff.WidenedFiles
 
 	// Step 2: Nothing to review.
 	if strings.TrimSpace(redactedDiff) == "" {
