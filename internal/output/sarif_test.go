@@ -107,6 +107,11 @@ func TestSARIFWriter_WithFindings(t *testing.T) {
 		t.Errorf("Region = %d-%d, want 42-45", loc.Region.StartLine, loc.Region.EndLine)
 	}
 
+	// The finding ID is the result's partial fingerprint.
+	if got := run.Results[0].PartialFingerprints[sarifFingerprintKey]; got != "abc" {
+		t.Errorf("partialFingerprints[%s] = %q, want %q", sarifFingerprintKey, got, "abc")
+	}
+
 	// Check fixes (suggestion)
 	if len(run.Results[0].Fixes) != 1 {
 		t.Fatalf("Results[0] has %d fixes, want 1", len(run.Results[0].Fixes))

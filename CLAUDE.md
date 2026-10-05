@@ -51,7 +51,7 @@ type Reviewer interface {
 
 ### Finding IDs
 
-IDs are stable hashes of `path + title + hunk context` so CI diffs remain consistent across runs.
+IDs are fingerprints of `path + category + normalized evidence + enclosing declaration` (`internal/review/fingerprint.go`). The declaration is the nearest line at or above the evidence that starts one (git's hunk-header rule), taken from the hunk or from the hunk header, so it does not depend on diff context size. The same issue keeps its ID when the model rewords the title or lines shift, and identical code in two functions gets two IDs. Two findings on the same code in the same declaration and category share an ID (deduplication matches ID + title + start line, so both are kept). Findings without evidence fall back to `path + title + start line`. SARIF emits the ID under `partialFingerprints["prismFindingId/v1"]`.
 
 ## Configuration
 

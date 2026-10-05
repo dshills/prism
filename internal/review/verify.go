@@ -63,20 +63,7 @@ type indexedLine struct {
 // file's section of diff, and corrects its lines when the evidence sits
 // elsewhere.
 func verifyEvidence(findings []Finding, diff string) (kept []Finding, discarded []Discard) {
-	files := map[string][]indexedLine{}
-	for _, sec := range diffutil.SplitSections(diff) {
-		p := diffutil.PathFromSection(sec)
-		if p == "" {
-			continue
-		}
-		var lines []indexedLine
-		for _, l := range diffutil.PostImageLines(sec) {
-			if n := normalizeCode(l.Text); n != "" {
-				lines = append(lines, indexedLine{norm: n, line: l})
-			}
-		}
-		files[p] = lines
-	}
+	files := indexFiles(diff)
 
 	kept = make([]Finding, 0, len(findings))
 	discarded = []Discard{}
@@ -107,11 +94,42 @@ func verifyEvidence(findings []Finding, diff string) (kept []Finding, discarded 
 	return kept, discarded
 }
 
+// indexFiles indexes each file section of diff by path: its non-blank hunk
+// lines, normalised for matching quoted evidence.
+func indexFiles(diff string) map[string][]indexedLine {
+	files := map[string][]indexedLine{}
+	for _, sec := range diffutil.SplitSections(diff) {
+		p := diffutil.PathFromSection(sec)
+		if p == "" {
+			continue
+		}
+		var lines []indexedLine
+		for _, l := range diffutil.PostImageLines(sec) {
+			if n := normalizeCode(l.Text); n != "" {
+				lines = append(lines, indexedLine{norm: n, line: l})
+			}
+		}
+		files[p] = lines
+	}
+	return files
+}
+
 // locateEvidence finds the evidence as a contiguous run of the file's
 // normalised lines. When it occurs more than once, the match nearest the
 // finding's stated start line wins. It returns the new-file range of the
 // matched (non-removed) lines, or 0, 0 when the match is on removed lines only.
 func locateEvidence(lines []indexedLine, evidence string, statedStart int) (start, end int, found bool) {
+	i, n, found := locateEvidenceRun(lines, evidence, statedStart)
+	if !found {
+		return 0, 0, false
+	}
+	s, e := runRange(lines[i : i+n])
+	return s, e, true
+}
+
+// locateEvidenceRun is locateEvidence's match as a position in lines: the
+// index of its first line and its length.
+func locateEvidenceRun(lines []indexedLine, evidence string, statedStart int) (i, n int, found bool) {
 	ev := evidenceLines(evidence, false)
 	matches := findRuns(lines, ev)
 	if len(matches) == 0 {
@@ -132,8 +150,7 @@ func locateEvidence(lines []indexedLine, evidence string, statedStart int) (star
 			best, bestDist = m, d
 		}
 	}
-	s, e := runRange(lines[best : best+len(ev)])
-	return s, e, true
+	return best, len(ev), true
 }
 
 func findRuns(lines []indexedLine, ev []string) []int {

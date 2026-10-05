@@ -228,7 +228,7 @@ config.json example:
 }
 
 Notes:
-	•	id should be stable-ish (hash of path + title + hunk context) so CI diffs are sane.
+	•	id is a stable fingerprint: a hash of path + category + the quoted evidence (normalized: diff markers stripped, whitespace collapsed) + the enclosing declaration: the nearest new-file line at or above the evidence that starts a declaration (git's hunk-header rule: it begins with a letter, _ or $), from the hunk or else from the hunk header, so it does not depend on the diff's context size. The same issue keeps its id across runs when the title is reworded or the lines move, and the same code in two functions gets two ids. Two findings on the same code in the same declaration and category share an id; deduplication matches id, title and start line, so both are kept. A finding without evidence falls back to path + title + start line. SARIF output carries the id in partialFingerprints.
 	•	confidence is an estimate; used only for sorting/filters.
 	•	Every finding carries provider and model identifying the LLM that produced it. In compare mode, different findings may have different values.
 	•	_provenance is a top-level list of every (provider, model) that contributed to the run. Single-model runs have one entry; compare mode has one entry per compared model (including zero-finding models). The underscore prefix marks it as tool-level metadata and keeps downstream JSON consumers that iterate known fields unaffected.

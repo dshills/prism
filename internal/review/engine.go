@@ -181,7 +181,7 @@ func reviewWholeCached(ctx context.Context, redactedDiff string, files []string,
 	cacheKey := diffCacheKey(cfg, prompt, redactedDiff)
 	if cached, ok := rc.Get(cacheKey); ok {
 		// A corrupt entry falls through to the LLM.
-		if findings, err := parseFindings(cached); err == nil {
+		if findings, err := parseReviewedFindings(cached, redactedDiff); err == nil {
 			// Legacy cache entries may lack provenance; stamp from the cache
 			// key's (provider, model) since the key itself fixes them.
 			cov.CacheHit = true
@@ -210,7 +210,7 @@ func reviewWholeCached(ctx context.Context, redactedDiff string, files []string,
 	}
 	llmMs := time.Since(llmStart).Milliseconds()
 
-	findings, err := parseFindings(resp.Content)
+	findings, err := parseReviewedFindings(resp.Content, redactedDiff)
 	if err != nil {
 		// Attempt one repair pass
 		repairPrompt := fmt.Sprintf(
@@ -227,7 +227,7 @@ func reviewWholeCached(ctx context.Context, redactedDiff string, files []string,
 		if err2 != nil {
 			return nil, llmMs, fmt.Errorf("repair pass failed: %w (original error: %w)", err2, err)
 		}
-		findings, err = parseFindings(resp2.Content)
+		findings, err = parseReviewedFindings(resp2.Content, redactedDiff)
 		if err != nil {
 			return nil, llmMs, fmt.Errorf("response validation failed after repair: %w", err)
 		}
@@ -254,7 +254,7 @@ func reviewChunksCached(ctx context.Context, chunks []Chunk, cfg config.Config, 
 		keys[i] = chunkCacheKey(cfg, prompt, c.Diff)
 		if cached, ok := rc.Get(keys[i]); ok {
 			// A corrupt entry is a miss.
-			if fs, err := parseFindings(cached); err == nil {
+			if fs, err := parseReviewedFindings(cached, c.Diff); err == nil {
 				perChunk[i] = stampProvenance(fs, cfg.Provider, cfg.Model)
 				continue
 			}
@@ -395,20 +395,6 @@ func findingsToRaw(findings []Finding) []rawFinding {
 	return raw
 }
 
-func generateFindingID(f Finding) string {
-	var path string
-	if len(f.Locations) > 0 {
-		path = f.Locations[0].Path
-	}
-	data := fmt.Sprintf("%s:%s:%d", path, f.Title, func() int {
-		if len(f.Locations) > 0 {
-			return f.Locations[0].Lines.Start
-		}
-		return 0
-	}())
-	h := sha256.Sum256([]byte(data))
-	return fmt.Sprintf("%x", h[:8])
-}
 
 // GenerateRunID creates a unique run identifier.
 func GenerateRunID() string {
@@ -485,7 +471,7 @@ func runCodebaseWithFileCache(
 	for _, section := range sections {
 		key := fileCacheKey(cfg.Provider, cfg.Model, prompt, section)
 		if cached, ok := reviewCache.Get(key); ok {
-			parsed, err := parseFindings(cached)
+			parsed, err := parseReviewedFindings(cached, section)
 			if err == nil {
 				// Valid cache hit — collect findings and skip LLM for this file.
 				cachedFindings = append(cachedFindings, parsed...)

@@ -97,13 +97,21 @@ type sarifRuleProperties struct {
 }
 
 type sarifResult struct {
-	RuleID     string                 `json:"ruleId"`
-	Level      string                 `json:"level"`
-	Message    sarifMessage           `json:"message"`
-	Locations  []sarifLocation        `json:"locations,omitempty"`
-	Fixes      []sarifFix             `json:"fixes,omitempty"`
-	Properties *sarifResultProperties `json:"properties,omitempty"`
+	RuleID    string          `json:"ruleId"`
+	Level     string          `json:"level"`
+	Message   sarifMessage    `json:"message"`
+	Locations []sarifLocation `json:"locations,omitempty"`
+	// PartialFingerprints carries the finding's stable ID, so GitHub code
+	// scanning and other consumers track the same issue across runs even
+	// when its lines move.
+	PartialFingerprints map[string]string      `json:"partialFingerprints,omitempty"`
+	Fixes               []sarifFix             `json:"fixes,omitempty"`
+	Properties          *sarifResultProperties `json:"properties,omitempty"`
 }
+
+// sarifFingerprintKey names prism's finding ID among a result's partial
+// fingerprints. The version changes if the fingerprint scheme does.
+const sarifFingerprintKey = "prismFindingId/v1"
 
 // sarifResultProperties carries per-finding provenance. Consumers link a
 // result to its producing extension by matching (provider, model) against
@@ -163,6 +171,9 @@ func buildSARIF(report *review.Report) sarifLog {
 			RuleID:  ruleID,
 			Level:   severityToLevel(f.Severity),
 			Message: sarifMessage{Text: f.Message},
+		}
+		if f.ID != "" {
+			result.PartialFingerprints = map[string]string{sarifFingerprintKey: f.ID}
 		}
 
 		for _, loc := range f.Locations {

@@ -276,7 +276,7 @@ func reviewChunks(ctx context.Context, chunks []Chunk, todo []int, provider prov
 				return
 			}
 
-			findings, err := parseFindings(resp.Content)
+			findings, err := parseReviewedFindings(resp.Content, chunk.Diff)
 			if err != nil {
 				// Try repair
 				repairPrompt := fmt.Sprintf(
@@ -295,7 +295,7 @@ func reviewChunks(ctx context.Context, chunks []Chunk, todo []int, provider prov
 					errs[i] = fmt.Errorf("repair: %w", err2)
 					return
 				}
-				findings, err = parseFindings(resp2.Content)
+				findings, err = parseReviewedFindings(resp2.Content, chunk.Diff)
 				if err != nil {
 					errs[i] = fmt.Errorf("validation after repair: %w", err)
 					return
@@ -382,13 +382,17 @@ func mergeChunkFindings(perChunk [][]Finding) []Finding {
 	return all
 }
 
-// DeduplicateFindings removes duplicate findings by ID.
+// DeduplicateFindings removes findings reported twice: the same ID (the same
+// code, declaration and category, see fingerprint.go), title and start line.
+// Findings that share an ID but differ in title or line are kept, since they
+// may be two issues on the same code, or the same code twice in a function.
 func DeduplicateFindings(findings []Finding) []Finding {
 	seen := make(map[string]bool)
 	var result []Finding
 	for _, f := range findings {
-		if !seen[f.ID] {
-			seen[f.ID] = true
+		key := fmt.Sprintf("%s\x00%s\x00%d", f.ID, f.Title, findingStartLine(f))
+		if !seen[key] {
+			seen[key] = true
 			result = append(result, f)
 		}
 	}

@@ -49,7 +49,7 @@ On any given codebase run the following steps execute in order:
 5. If all files are cached, no LLM call is made and the review proceeds directly to step 8.
 6. The filtered diff (uncached files only) is sent to the LLM via the existing chunked review path.
 7. After the LLM returns, each file's fresh findings are stored to cache individually before the report is built.
-8. Cached and fresh findings are merged, deduplicated (by finding ID), sorted (high → medium → low, then by path, then by line), and limited to `cfg.MaxFindings`, in that exact order.
+8. Cached and fresh findings are merged, deduplicated (by finding ID, title and start line), sorted (high → medium → low, then by path, then by line), and limited to `cfg.MaxFindings`, in that exact order.
 
 ### FR-4: Cache miss storage
 

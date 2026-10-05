@@ -55,6 +55,10 @@ type Line struct {
 	Removed bool
 	// Hunk is the 1-based index of the hunk the line belongs to.
 	Hunk int
+	// Heading is the text git puts after its hunk's header,
+	// "@@ -a,b +c,d @@ heading": the nearest line above the hunk that starts
+	// a declaration (for Go, a func or type line), or "" when there is none.
+	Heading string
 }
 
 // PostImageLines returns the hunk lines of one file's diff section, in order,
@@ -65,10 +69,12 @@ func PostImageLines(section string) []Line {
 	var out []Line
 	newLine := 0
 	hunk := 0
+	heading := ""
 	inHunk := false
 	for _, raw := range strings.Split(section, "\n") {
 		if strings.HasPrefix(raw, "@@") {
 			newLine = hunkNewStart(raw)
+			heading = hunkHeading(raw)
 			hunk++
 			inHunk = true
 			continue
@@ -78,10 +84,10 @@ func PostImageLines(section string) []Line {
 		}
 		switch raw[0] {
 		case '+', ' ':
-			out = append(out, Line{Text: raw[1:], NewLine: newLine, Hunk: hunk})
+			out = append(out, Line{Text: raw[1:], NewLine: newLine, Hunk: hunk, Heading: heading})
 			newLine++
 		case '-':
-			out = append(out, Line{Text: raw[1:], Removed: true, Hunk: hunk})
+			out = append(out, Line{Text: raw[1:], Removed: true, Hunk: hunk, Heading: heading})
 		case '\\':
 			// "\ No newline at end of file"
 		default:
@@ -91,6 +97,19 @@ func PostImageLines(section string) []Line {
 		}
 	}
 	return out
+}
+
+// hunkHeading returns the text after a hunk header's closing "@@", trimmed.
+func hunkHeading(header string) string {
+	rest, ok := strings.CutPrefix(header, "@@")
+	if !ok {
+		return ""
+	}
+	_, heading, ok := strings.Cut(rest, "@@")
+	if !ok {
+		return ""
+	}
+	return strings.TrimSpace(heading)
 }
 
 // hunkNewStart parses the new-file start line from a hunk header

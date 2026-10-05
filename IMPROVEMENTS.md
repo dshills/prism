@@ -14,7 +14,7 @@ Prism is run by AI coding agents (Claude Code, Codex), not by people at a termin
 | 1 | Cache keys that cover every prompt input | Accuracy | High | **Done** |
 | 2 | Per-chunk caching for diff modes | Speed, Tokens | High | **Done** |
 | 3 | Keep partial results when a chunk fails | Speed, Tokens | High | **Done** |
-| 4 | Stable finding fingerprints | Accuracy, Workflow | High | Not started |
+| 4 | Stable finding fingerprints | Accuracy, Workflow | High | **Done** |
 | 5 | Finding baseline / suppression | Workflow | High | Not started |
 | 6 | Native structured output | Accuracy, Tokens | High | Not started |
 | 7 | Structured fix format | Workflow | High | Not started |
@@ -87,7 +87,14 @@ The limit: a diff that fits in one chunk (24 KB by default) is still cached as a
 
 ---
 
-### 4. Stable finding fingerprints
+### 4. Stable finding fingerprints (DONE)
+
+**Status:** Done (`internal/review/fingerprint.go`).
+- **What the ID hashes:** the path, the category, the evidence (normalized the way verification matches it), and the enclosing declaration. The declaration is the nearest line at or above the evidence that starts one, by git's hunk-header rule (for Go, the `func` or `type` line). It is read from the hunk, or from the hunk header that git computes from the whole file, so it doesn't depend on the diff's context size. Rewording the title or moving the lines no longer changes the ID. The same code in two functions gets two IDs.
+- **Same code, same declaration and category:** two findings like this share an ID. Numbering them was rejected because the order comes from titles or list order, both of which shift, so one finding could inherit the other's ID. Neighboring-line anchors were also tried; they changed the ID whenever the hunk's context changed. `DeduplicateFindings` matches ID plus title plus start line, so both findings are kept.
+- **Other cases:** the ID is computed from the reviewed text, so it doesn't depend on chunking. Findings without evidence keep the earlier `path:title:startLine` ID.
+- **SARIF:** the ID is emitted as `partialFingerprints["prismFindingId/v1"]`. Severity overrides no longer regenerate it.
+- **Limits:** renaming the enclosing function changes the ID, so the finding shows up as new. Git takes the hunk header from the old file, so an uncommitted rename above a hunk shows the old name until it's committed. Declarations are cut to the 80 bytes git keeps in a header, so long signatures anchor the same either way. A repo whose `.gitattributes` sets a `diff=` driver (such as `golang`) gets header text from that driver's pattern, which may not match the in-hunk rule. Such a finding can change ID when the hunk grows to include its declaration.
 
 **Problem:** A finding's ID is `sha256(path:title:startLine)`. The title is model-written text that varies from run to run, and the start line moves whenever lines are added above it. The same issue gets a new ID on the next run, so the cross-chunk deduplication, the baseline (#5) and delta mode (#9) all fail to recognize it.
 
@@ -123,7 +130,7 @@ secret := loadFromVault() // prism:ignore security "loaded from vault, not hardc
 
 The directive lives in the code, not in agent memory, so it holds across all future sessions.
 
-The baseline depends on IDs that hold steady across runs, which today's IDs don't (#4).
+The baseline keys on finding fingerprints, which hold steady across runs (#4). Its granularity is a quoted piece of code, in one declaration, in one category: accepting a finding also accepts any other finding of that category on the same code in the same function, since the two share an ID. A finer split needs a stable issue type from the model (a fixed rule list, which #6's schema could add).
 
 ---
 

@@ -397,15 +397,18 @@ func TestSplitIntoChunks_DefaultMaxBytes(t *testing.T) {
 	}
 }
 
+// A finding repeated with the same ID and title is dropped. The same ID with
+// another title is a second issue on the same code, so it is kept.
 func TestDeduplicateFindings(t *testing.T) {
 	findings := []Finding{
 		{ID: "a", Title: "Finding A"},
 		{ID: "b", Title: "Finding B"},
-		{ID: "a", Title: "Finding A duplicate"},
+		{ID: "a", Title: "Finding A"},
+		{ID: "a", Title: "Another issue on A's code"},
 	}
 	result := DeduplicateFindings(findings)
-	if len(result) != 2 {
-		t.Errorf("got %d findings, want 2", len(result))
+	if len(result) != 3 {
+		t.Errorf("got %d findings, want 3", len(result))
 	}
 }
 

@@ -79,9 +79,8 @@ func ApplySeverityOverrides(findings []Finding, rules *Rules) []Finding {
 	for i := range findings {
 		cat := string(findings[i].Category)
 		if override, ok := rules.SeverityOverrides[cat]; ok {
+			// The ID is kept: it does not depend on severity.
 			findings[i].Severity = Severity(override)
-			// Regenerate ID since severity change may affect dedup
-			findings[i].ID = generateFindingID(findings[i])
 		}
 	}
 	return findings

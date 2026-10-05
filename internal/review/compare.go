@@ -94,7 +94,7 @@ func RunCompareWithOptions(ctx context.Context, diff string, files []string, mod
 				return
 			}
 
-			findings, err := parseFindings(resp.Content)
+			findings, err := parseReviewedFindings(resp.Content, redactedDiff)
 			if err != nil {
 				results[i] = compareModelResult{label: spec, err: fmt.Errorf("%s: invalid response: %w", spec, err)}
 				return

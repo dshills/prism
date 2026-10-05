@@ -372,7 +372,7 @@ Each finding includes:
 - **Confidence**: 0.0 to 1.0 estimate
 - **Locations**: file path, line range, and optional code snippet
 - **Suggestion**: actionable fix, often with code
-- **Stable ID**: SHA-256 hash of path + title + start line, consistent across runs
+- **Stable ID**: SHA-256 fingerprint of path + category + quoted evidence + the declaration (for Go, the `func` or `type` line) it sits in. The same issue keeps its ID when the model rewords the title or the code moves, and the same code in two functions gets two IDs. Also emitted in SARIF as `partialFingerprints`. Findings without evidence fall back to path + title + start line.
 
 ## AI Development Workflows
 
