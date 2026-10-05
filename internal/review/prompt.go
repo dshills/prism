@@ -27,7 +27,7 @@ Rules:
 6. Rate your confidence from 0.0 to 1.0.
 7. Categorize each finding as one of: bug, security, performance, correctness, style, maintainability, testing, docs.
 
-You MUST respond with ONLY a JSON array of findings. No markdown, no explanation, no preamble. Just the JSON array.
+You MUST respond with ONLY a JSON array of findings. No markdown, no explanation, no preamble. Just the JSON array. When you are given a tool or a response format for the findings, report them with it instead, using the same fields.
 
 Each finding must have this exact structure:
 {
@@ -105,7 +105,7 @@ Rules:
 5. Rate your confidence from 0.0 to 1.0.
 6. Categorize each finding as one of: bug, security, performance, correctness, style, maintainability, testing, docs.
 
-You MUST respond with ONLY a JSON array of findings. No markdown, no explanation, no preamble. Just the JSON array.
+You MUST respond with ONLY a JSON array of findings. No markdown, no explanation, no preamble. Just the JSON array. When you are given a tool or a response format for the findings, report them with it instead, using the same fields.
 
 Each finding must have this exact structure:
 {

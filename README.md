@@ -356,6 +356,10 @@ prism review staged --rules rules.json
 | Gemini | `GEMINI_API_KEY` | gemini-3-flash-preview, gemini-3-pro-preview, gemini-2.5-flash, gemini-2.5-pro |
 | Ollama | — | llama3.3, llama3.2, llama3.1, codellama, qwen2.5-coder, deepseek-coder-v2 |
 
+### Structured Output
+
+Prism asks every provider for its findings in the provider's structured-output mode, constrained to a JSON schema: `response_format` for OpenAI (and OpenAI-compatible servers through the `ollama` provider), `output_config.format` for Anthropic, and `responseSchema` for Gemini. Responses are therefore always valid JSON with valid severities and categories, and the repair call for malformed output is rarely needed. An endpoint that doesn't support it is detected on its first refusal and asked in plain JSON from then on. The live check is `go test -tags integration -run TestStructuredOutputLive ./internal/review`.
+
 ### Switching Providers
 
 ```bash

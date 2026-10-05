@@ -199,6 +199,7 @@ func reviewWholeCached(ctx context.Context, redactedDiff string, files []string,
 		SystemPrompt: sysPr,
 		UserPrompt:   userPr,
 		MaxTokens:    8192,
+		Output:       findingsOutput,
 	}
 
 	resp, err := provider.Review(ctx, req)
@@ -219,6 +220,7 @@ func reviewWholeCached(ctx context.Context, redactedDiff string, files []string,
 			SystemPrompt: sysPr,
 			UserPrompt:   repairPrompt,
 			MaxTokens:    8192,
+			Output:       findingsOutput,
 		}
 		resp2, err2 := provider.Review(ctx, repairReq)
 		cov.LLMCalls++
@@ -317,9 +319,9 @@ func parseFindings(content string) ([]Finding, error) {
 		}
 	}
 
-	var raw []rawFinding
-	if err := json.Unmarshal([]byte(content), &raw); err != nil {
-		return nil, fmt.Errorf("invalid JSON array: %w", err)
+	raw, err := decodeRawFindings(content)
+	if err != nil {
+		return nil, err
 	}
 
 	findings := make([]Finding, 0, len(raw))
@@ -350,6 +352,28 @@ func parseFindings(content string) ([]Finding, error) {
 	}
 
 	return findings, nil
+}
+
+// decodeRawFindings reads a response's findings: a JSON array of them, or
+// the {"findings": [...]} object that structured output returns.
+func decodeRawFindings(content string) ([]rawFinding, error) {
+	if strings.HasPrefix(content, "{") {
+		var wrapped struct {
+			Findings *[]rawFinding `json:"findings"`
+		}
+		if err := json.Unmarshal([]byte(content), &wrapped); err != nil {
+			return nil, fmt.Errorf("invalid findings object: %w", err)
+		}
+		if wrapped.Findings == nil {
+			return nil, fmt.Errorf(`invalid findings object: no "findings" array`)
+		}
+		return *wrapped.Findings, nil
+	}
+	var raw []rawFinding
+	if err := json.Unmarshal([]byte(content), &raw); err != nil {
+		return nil, fmt.Errorf("invalid JSON array: %w", err)
+	}
+	return raw, nil
 }
 
 // stampProvenance sets Provider and Model on every finding that doesn't

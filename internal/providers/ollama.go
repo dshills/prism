@@ -20,6 +20,7 @@ type Ollama struct {
 	model   string
 	baseURL string
 	client  *http.Client
+	schema  schemaSupport
 }
 
 // NewOllama creates a new Ollama provider. No API key is required by default.
@@ -48,6 +49,21 @@ func NewOllama(model string) (*Ollama, error) {
 func (o *Ollama) Name() string { return "ollama" }
 
 func (o *Ollama) Review(ctx context.Context, req ReviewRequest) (ReviewResponse, error) {
+	structured := o.schema.use(req.Output)
+	resp, err := o.review(ctx, req, structured)
+	if structured && refusedSchema(err) {
+		// The endpoint does not take response_format: ask again without it,
+		// and stop asking once that works.
+		if resp, err = o.review(ctx, req, false); err == nil {
+			o.schema.rejected.Store(true)
+		}
+	}
+	return resp, err
+}
+
+// review sends one review request, asking for structured output when
+// structured is true.
+func (o *Ollama) review(ctx context.Context, req ReviewRequest, structured bool) (ReviewResponse, error) {
 	maxTokens := req.MaxTokens
 	if maxTokens == 0 {
 		maxTokens = 4096
@@ -65,6 +81,9 @@ func (o *Ollama) Review(ctx context.Context, req ReviewRequest) (ReviewResponse,
 	}
 	if req.Temperature > 0 {
 		body.Temperature = &req.Temperature
+	}
+	if structured {
+		body.ResponseFormat = openaiFormat(req.Output)
 	}
 
 	payload, err := json.Marshal(body)
@@ -104,7 +123,7 @@ func (o *Ollama) Review(ctx context.Context, req ReviewRequest) (ReviewResponse,
 			return newServerError(httpResp.StatusCode, httpResp.Header, string(respBody))
 		}
 		if httpResp.StatusCode != 200 {
-			return fmt.Errorf("API error (status %d): %s", httpResp.StatusCode, string(respBody))
+			return &requestError{status: httpResp.StatusCode, body: string(respBody)}
 		}
 
 		var result openaiResponse

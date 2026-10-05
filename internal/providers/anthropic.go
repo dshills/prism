@@ -21,6 +21,7 @@ type Anthropic struct {
 	apiKey string
 	model  string
 	client *http.Client
+	schema schemaSupport
 }
 
 // NewAnthropic creates a new Anthropic provider.
@@ -39,6 +40,21 @@ func NewAnthropic(model string) (*Anthropic, error) {
 func (a *Anthropic) Name() string { return "anthropic" }
 
 func (a *Anthropic) Review(ctx context.Context, req ReviewRequest) (ReviewResponse, error) {
+	structured := a.schema.use(req.Output)
+	resp, err := a.review(ctx, req, structured)
+	if structured && refusedSchema(err) {
+		// The model does not take a schema: ask again without one, and stop
+		// asking once that works.
+		if resp, err = a.review(ctx, req, false); err == nil {
+			a.schema.rejected.Store(true)
+		}
+	}
+	return resp, err
+}
+
+// review sends one review request, asking for structured output when
+// structured is true.
+func (a *Anthropic) review(ctx context.Context, req ReviewRequest, structured bool) (ReviewResponse, error) {
 	maxTokens := req.MaxTokens
 	if maxTokens == 0 {
 		maxTokens = 4096
@@ -51,6 +67,15 @@ func (a *Anthropic) Review(ctx context.Context, req ReviewRequest) (ReviewRespon
 		Messages: []anthropicMessage{
 			{Role: "user", Content: req.UserPrompt},
 		},
+	}
+	if structured {
+		// Structured outputs (JSON outputs): the response text is JSON that
+		// matches the schema. Every object needs additionalProperties false,
+		// as in OpenAI's strict mode. Models without the feature refuse the
+		// request, and Review asks again without it.
+		body.OutputConfig = &anthropicOutputConfig{
+			Format: &anthropicFormat{Type: "json_schema", Schema: req.Output.Schema.jsonSchema(true)},
+		}
 	}
 
 	payload, err := json.Marshal(body)
@@ -89,7 +114,7 @@ func (a *Anthropic) Review(ctx context.Context, req ReviewRequest) (ReviewRespon
 			return newServerError(httpResp.StatusCode, httpResp.Header, string(respBody))
 		}
 		if httpResp.StatusCode != 200 {
-			return fmt.Errorf("API error (status %d): %s", httpResp.StatusCode, string(respBody))
+			return &requestError{status: httpResp.StatusCode, body: string(respBody)}
 		}
 
 		var result anthropicResponse
@@ -120,10 +145,21 @@ func (a *Anthropic) Review(ctx context.Context, req ReviewRequest) (ReviewRespon
 }
 
 type anthropicRequest struct {
-	Model     string             `json:"model"`
-	MaxTokens int                `json:"max_tokens"`
-	System    string             `json:"system,omitempty"`
-	Messages  []anthropicMessage `json:"messages"`
+	Model        string                 `json:"model"`
+	MaxTokens    int                    `json:"max_tokens"`
+	System       string                 `json:"system,omitempty"`
+	Messages     []anthropicMessage     `json:"messages"`
+	OutputConfig *anthropicOutputConfig `json:"output_config,omitempty"`
+}
+
+type anthropicOutputConfig struct {
+	Format *anthropicFormat `json:"format,omitempty"`
+}
+
+// anthropicFormat is a structured-output response format.
+type anthropicFormat struct {
+	Type   string         `json:"type"`
+	Schema map[string]any `json:"schema"`
 }
 
 type anthropicMessage struct {

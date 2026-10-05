@@ -16,7 +16,7 @@ Prism is run by AI coding agents (Claude Code, Codex), not by people at a termin
 | 3 | Keep partial results when a chunk fails | Speed, Tokens | High | **Done** |
 | 4 | Stable finding fingerprints | Accuracy, Workflow | High | **Done** |
 | 5 | Finding baseline / suppression | Workflow | High | **Done** |
-| 6 | Native structured output | Accuracy, Tokens | High | Not started |
+| 6 | Native structured output | Accuracy, Tokens | High | **Done** |
 | 7 | Structured fix format | Workflow | High | Not started |
 | 8 | Fallback provider | Workflow | High | Not started |
 | 9 | Delta mode: net-new findings | Workflow | High | Not started |
@@ -146,7 +146,16 @@ The baseline keys on finding fingerprints, which hold steady across runs (#4). I
 
 ---
 
-### 6. Native structured output
+### 6. Native structured output (DONE)
+
+**Status:** Done.
+- **The schema:** `internal/review/output.go` defines the findings schema: an object holding the findings array, with severity and category as enums. A test keeps it in step with `rawFinding`.
+- **Provider modes:** `internal/providers/schema.go` renders it per provider: strict JSON Schema in `response_format` for OpenAI and the OpenAI-compatible Ollama/LM Studio endpoint, `output_config.format` (JSON outputs) for Anthropic, and `responseSchema` with upper-case types for Gemini.
+- **Where it's used:** every review request asks for it, including single, chunked, repair and compare calls.
+- **Fallback:** when an endpoint refuses the request (400/422) and the same request succeeds without the schema, the provider stops asking for the rest of the run. An unrelated 400 doesn't switch it off.
+- **Parsing and prompt:** `parseFindings` reads the object or a bare array, so the repair pass still covers endpoints without the mode. The system prompts tell the model to use the tool or format when one is given.
+- **Why not a forced tool call:** a forced tool call (`tool_choice: tool`) was the first version for Anthropic. It was replaced because Claude Opus 5.5, Sonnet 5.5 and Fable 5.1 refuse forced tool use with a 400, which would have silently turned structured output off on the newest models.
+- **Verified live:** `TestStructuredOutputLive` (build tag `integration`) confirms structured answers from OpenAI gpt-6.1-sol; Anthropic Claude Haiku 4.5, Sonnet 5.5 and Sonnet 4.6; and Gemini 3 Flash.
 
 **Problem:** Prism asks for JSON in the prompt, then parses free text. It strips code fences by hand, and on a parse failure it makes a second, full model call to repair the response. Severity and category values aren't constrained either, so a model can return `"critical"` or `"logic"` and the finding is still accepted.
 

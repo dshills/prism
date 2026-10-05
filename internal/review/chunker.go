@@ -260,6 +260,7 @@ func reviewChunks(ctx context.Context, chunks []Chunk, todo []int, provider prov
 				SystemPrompt: sysPr,
 				UserPrompt:   userPr,
 				MaxTokens:    8192,
+				Output:       findingsOutput,
 			}
 
 			llmStart := time.Now()
@@ -287,6 +288,7 @@ func reviewChunks(ctx context.Context, chunks []Chunk, todo []int, provider prov
 					SystemPrompt: sysPr,
 					UserPrompt:   repairPrompt,
 					MaxTokens:    8192,
+					Output:       findingsOutput,
 				})
 				mu.Lock()
 				calls++

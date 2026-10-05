@@ -21,6 +21,7 @@ type OpenAI struct {
 	model   string
 	baseURL string
 	client  *http.Client
+	schema  schemaSupport
 }
 
 // NewOpenAI creates a new OpenAI provider.
@@ -44,6 +45,21 @@ func NewOpenAI(model string) (*OpenAI, error) {
 func (o *OpenAI) Name() string { return "openai" }
 
 func (o *OpenAI) Review(ctx context.Context, req ReviewRequest) (ReviewResponse, error) {
+	structured := o.schema.use(req.Output)
+	resp, err := o.review(ctx, req, structured)
+	if structured && refusedSchema(err) {
+		// The endpoint does not take response_format: ask again without it,
+		// and stop asking once that works.
+		if resp, err = o.review(ctx, req, false); err == nil {
+			o.schema.rejected.Store(true)
+		}
+	}
+	return resp, err
+}
+
+// review sends one review request, asking for structured output when
+// structured is true.
+func (o *OpenAI) review(ctx context.Context, req ReviewRequest, structured bool) (ReviewResponse, error) {
 	maxTokens := req.MaxTokens
 	if maxTokens == 0 {
 		maxTokens = 4096
@@ -66,6 +82,9 @@ func (o *OpenAI) Review(ctx context.Context, req ReviewRequest) (ReviewResponse,
 	}
 	if req.Temperature > 0 {
 		body.Temperature = &req.Temperature
+	}
+	if structured {
+		body.ResponseFormat = openaiFormat(req.Output)
 	}
 
 	payload, err := json.Marshal(body)
@@ -103,7 +122,7 @@ func (o *OpenAI) Review(ctx context.Context, req ReviewRequest) (ReviewResponse,
 			return newServerError(httpResp.StatusCode, httpResp.Header, string(respBody))
 		}
 		if httpResp.StatusCode != 200 {
-			return fmt.Errorf("API error (status %d): %s", httpResp.StatusCode, string(respBody))
+			return &requestError{status: httpResp.StatusCode, body: string(respBody)}
 		}
 
 		var result openaiResponse
@@ -131,11 +150,40 @@ func (o *OpenAI) Review(ctx context.Context, req ReviewRequest) (ReviewResponse,
 }
 
 type openaiRequest struct {
-	Model               string          `json:"model"`
-	Messages            []openaiMessage `json:"messages"`
-	MaxTokens           int             `json:"max_tokens,omitempty"`
-	MaxCompletionTokens int             `json:"max_completion_tokens,omitempty"`
-	Temperature         *float64        `json:"temperature,omitempty"`
+	Model               string                `json:"model"`
+	Messages            []openaiMessage       `json:"messages"`
+	MaxTokens           int                   `json:"max_tokens,omitempty"`
+	MaxCompletionTokens int                   `json:"max_completion_tokens,omitempty"`
+	Temperature         *float64              `json:"temperature,omitempty"`
+	ResponseFormat      *openaiResponseFormat `json:"response_format,omitempty"`
+}
+
+// openaiResponseFormat asks for structured output: a response that matches
+// a JSON schema. OpenAI-compatible servers (Ollama, LM Studio) accept the
+// same field.
+type openaiResponseFormat struct {
+	Type       string            `json:"type"`
+	JSONSchema *openaiJSONSchema `json:"json_schema,omitempty"`
+}
+
+type openaiJSONSchema struct {
+	Name        string         `json:"name"`
+	Description string         `json:"description,omitempty"`
+	Strict      bool           `json:"strict"`
+	Schema      map[string]any `json:"schema"`
+}
+
+// openaiFormat is the response_format for out.
+func openaiFormat(out *Output) *openaiResponseFormat {
+	return &openaiResponseFormat{
+		Type: "json_schema",
+		JSONSchema: &openaiJSONSchema{
+			Name:        out.Name,
+			Description: out.Description,
+			Strict:      true,
+			Schema:      out.Schema.jsonSchema(true),
+		},
+	}
 }
 
 // legacyMaxTokensFamilies are the OpenAI model families that still take

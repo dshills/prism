@@ -18,6 +18,7 @@ type Gemini struct {
 	apiKey string
 	model  string
 	client *http.Client
+	schema schemaSupport
 }
 
 // NewGemini creates a new Gemini provider.
@@ -39,6 +40,21 @@ func NewGemini(model string) (*Gemini, error) {
 func (g *Gemini) Name() string { return "gemini" }
 
 func (g *Gemini) Review(ctx context.Context, req ReviewRequest) (ReviewResponse, error) {
+	structured := g.schema.use(req.Output)
+	resp, err := g.review(ctx, req, structured)
+	if structured && refusedSchema(err) {
+		// The model does not take a schema: ask again without one, and stop
+		// asking once that works.
+		if resp, err = g.review(ctx, req, false); err == nil {
+			g.schema.rejected.Store(true)
+		}
+	}
+	return resp, err
+}
+
+// review sends one review request, asking for structured output when
+// structured is true.
+func (g *Gemini) review(ctx context.Context, req ReviewRequest, structured bool) (ReviewResponse, error) {
 	url := fmt.Sprintf("%s/%s:generateContent", geminiAPIURL, g.model)
 
 	body := geminiRequest{
@@ -60,6 +76,10 @@ func (g *Gemini) Review(ctx context.Context, req ReviewRequest) (ReviewResponse,
 	}
 	if req.Temperature > 0 {
 		body.GenerationConfig.Temperature = &req.Temperature
+	}
+	if structured {
+		body.GenerationConfig.ResponseMimeType = "application/json"
+		body.GenerationConfig.ResponseSchema = req.Output.Schema.geminiSchema()
 	}
 
 	payload, err := json.Marshal(body)
@@ -97,7 +117,7 @@ func (g *Gemini) Review(ctx context.Context, req ReviewRequest) (ReviewResponse,
 			return newServerError(httpResp.StatusCode, httpResp.Header, string(respBody))
 		}
 		if httpResp.StatusCode != 200 {
-			return fmt.Errorf("API error (status %d): %s", httpResp.StatusCode, string(respBody))
+			return &requestError{status: httpResp.StatusCode, body: string(respBody)}
 		}
 
 		var result geminiResponse
@@ -145,8 +165,11 @@ type geminiPart struct {
 }
 
 type geminiGenConfig struct {
-	MaxOutputTokens int      `json:"maxOutputTokens,omitempty"`
-	Temperature     *float64 `json:"temperature,omitempty"`
+	MaxOutputTokens  int      `json:"maxOutputTokens,omitempty"`
+	Temperature      *float64 `json:"temperature,omitempty"`
+	ResponseMimeType string   `json:"responseMimeType,omitempty"`
+	// ResponseSchema constrains the JSON response (structured output).
+	ResponseSchema map[string]any `json:"responseSchema,omitempty"`
 }
 
 type geminiResponse struct {

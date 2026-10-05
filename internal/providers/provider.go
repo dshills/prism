@@ -11,6 +11,9 @@ type ReviewRequest struct {
 	UserPrompt   string
 	MaxTokens    int
 	Temperature  float64
+	// Output, when set, asks for a response matching its schema in the
+	// provider's structured-output mode (see Output).
+	Output *Output
 }
 
 // ReviewResponse contains the raw response from an LLM.

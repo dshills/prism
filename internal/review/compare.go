@@ -82,6 +82,7 @@ func RunCompareWithOptions(ctx context.Context, diff string, files []string, mod
 				SystemPrompt: sysPr,
 				UserPrompt:   userPr,
 				MaxTokens:    8192,
+				Output:       findingsOutput,
 			})
 			elapsed := time.Since(llmStart).Milliseconds()
 
