@@ -200,11 +200,23 @@ func runChunkedCounted(ctx context.Context, chunks []Chunk, provider providers.R
 	if builder == nil {
 		builder = defaultPromptBuilder
 	}
-	perChunk, errs, llmMs, calls := reviewChunks(ctx, chunks, nil, provider, cfg, rules, builder)
-	if err := firstError(errs); err != nil {
-		return nil, llmMs, calls, err
+	run := reviewChunks(ctx, chunks, nil, provider, cfg, rules, builder)
+	if err := firstError(run.errs); err != nil {
+		return nil, run.llmMs, run.calls, err
 	}
-	return mergeChunkFindings(perChunk), llmMs, calls, nil
+	return mergeChunkFindings(run.findings), run.llmMs, run.calls, nil
+}
+
+// chunkRun is the result of reviewChunks, by chunk index.
+type chunkRun struct {
+	findings [][]Finding // each reviewed chunk's findings; nil when not reviewed or failed
+	errs     []error     // each failed chunk's error
+	// fallback marks the chunks a fallback provider answered (see
+	// providers.Fallback). Their results are not cached: a later run must not
+	// replay a fallback's review as the configured model's.
+	fallback []bool
+	llmMs    int64
+	calls    int
 }
 
 // reviewChunks reviews chunks in parallel and returns each chunk's findings
@@ -215,9 +227,9 @@ func runChunkedCounted(ctx context.Context, chunks []Chunk, provider providers.R
 // prompt is still built against the whole of chunks, so a chunk reviewed on
 // its own is told about the parts that were not.
 //
-// errs holds each failed chunk's error by chunk index, so the caller can keep
+// Each failed chunk's error is kept by chunk index, so the caller can keep
 // the chunks that succeeded and report the ones that did not.
-func reviewChunks(ctx context.Context, chunks []Chunk, todo []int, provider providers.Reviewer, cfg config.Config, rules *Rules, builder PromptBuilder) (perChunk [][]Finding, errs []error, llmMs int64, calls int) {
+func reviewChunks(ctx context.Context, chunks []Chunk, todo []int, provider providers.Reviewer, cfg config.Config, rules *Rules, builder PromptBuilder) chunkRun {
 	if todo == nil {
 		todo = make([]int, len(chunks))
 		for i := range chunks {
@@ -236,8 +248,12 @@ func reviewChunks(ctx context.Context, chunks []Chunk, todo []int, provider prov
 	}
 	limiter := ratelimit.New(rpm)
 
-	perChunk = make([][]Finding, len(chunks))
-	errs = make([]error, len(chunks))
+	run := chunkRun{
+		findings: make([][]Finding, len(chunks)),
+		errs:     make([]error, len(chunks)),
+		fallback: make([]bool, len(chunks)),
+	}
+	errs := run.errs
 	var wg sync.WaitGroup
 	sem := make(chan struct{}, concurrency)
 	var mu sync.Mutex
@@ -268,8 +284,8 @@ func reviewChunks(ctx context.Context, chunks []Chunk, todo []int, provider prov
 			elapsed := time.Since(llmStart).Milliseconds()
 
 			mu.Lock()
-			llmMs += elapsed
-			calls++
+			run.llmMs += elapsed
+			run.calls += providers.CallsOf(resp)
 			mu.Unlock()
 
 			if err != nil {
@@ -291,7 +307,7 @@ func reviewChunks(ctx context.Context, chunks []Chunk, todo []int, provider prov
 					Output:       findingsOutput,
 				})
 				mu.Lock()
-				calls++
+				run.calls += providers.CallsOf(resp2)
 				mu.Unlock()
 				if err2 != nil {
 					errs[i] = fmt.Errorf("repair: %w", err2)
@@ -305,12 +321,13 @@ func reviewChunks(ctx context.Context, chunks []Chunk, todo []int, provider prov
 				resp = resp2
 			}
 
-			perChunk[i] = stampProvenance(findings, resp.Provider, resp.Model)
+			run.findings[i] = stampProvenance(findings, resp.Provider, resp.Model)
+			run.fallback[i] = resp.Fallback
 		}(i, chunks[i])
 	}
 
 	wg.Wait()
-	return perChunk, errs, llmMs, calls
+	return run
 }
 
 // firstError is the first non-nil error in chunk order, labelled with its

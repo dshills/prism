@@ -33,9 +33,12 @@ type Config struct {
 	// BaselineFile is the baseline of accepted findings, relative to the
 	// repository root unless absolute. Empty means .prism-baseline.json;
 	// "none" turns the baseline off.
-	BaselineFile string        `json:"baselineFile,omitempty"`
-	Cache        CacheConfig   `json:"cache"`
-	Privacy      PrivacyConfig `json:"privacy"`
+	BaselineFile string `json:"baselineFile,omitempty"`
+	// Fallback is a "provider:model" to review with when the primary
+	// provider fails (auth, retries exhausted, unreachable). Empty: none.
+	Fallback string        `json:"fallback,omitempty"`
+	Cache    CacheConfig   `json:"cache"`
+	Privacy  PrivacyConfig `json:"privacy"`
 }
 
 // CacheConfig controls caching behavior.
@@ -210,6 +213,9 @@ func mergeFile(dst *Config, src Config) {
 	if src.BaselineFile != "" {
 		dst.BaselineFile = src.BaselineFile
 	}
+	if src.Fallback != "" {
+		dst.Fallback = src.Fallback
+	}
 	if src.Cache.Dir != "" {
 		dst.Cache.Dir = src.Cache.Dir
 	}
@@ -259,6 +265,9 @@ func mergeEnv(cfg *Config) error {
 	}
 	if v := os.Getenv("PRISM_BASELINE_FILE"); v != "" {
 		cfg.BaselineFile = v
+	}
+	if v := os.Getenv("PRISM_FALLBACK"); v != "" {
+		cfg.Fallback = v
 	}
 	if v := os.Getenv("PRISM_VERIFY_FINDINGS"); v != "" {
 		b, err := strconv.ParseBool(v)
@@ -338,6 +347,9 @@ func mergeOverrides(cfg *Config, overrides map[string]string) {
 	if v, ok := overrides["baselineFile"]; ok && v != "" {
 		cfg.BaselineFile = v
 	}
+	if v, ok := overrides["fallback"]; ok && v != "" {
+		cfg.Fallback = v
+	}
 	if v, ok := overrides["compare"]; ok && v != "" {
 		cfg.Compare = strings.Split(v, ",")
 	}
@@ -388,6 +400,8 @@ func SetField(cfg *Config, key, value string) error {
 		cfg.RulesFile = value
 	case "baselineFile":
 		cfg.BaselineFile = value
+	case "fallback":
+		cfg.Fallback = value
 	default:
 		return fmt.Errorf("unknown config key: %s", key)
 	}

@@ -29,10 +29,19 @@ type Coverage struct {
 	CacheHit bool       `json:"cacheHit"`
 	// CachedChunks is how many of Chunks were replayed from cache instead of
 	// sent to a model. It equals Chunks on a full cache hit.
-	CachedChunks   int    `json:"cachedChunks"`
-	TruncatedBytes int    `json:"truncatedBytes"`
-	Skipped        []Skip `json:"skipped"`
-	Complete       bool   `json:"complete"`
+	CachedChunks int `json:"cachedChunks"`
+	// Fallback is set when the configured provider failed and a fallback
+	// provider reviewed instead (all or part of the input).
+	Fallback       *FallbackUse `json:"fallback,omitempty"`
+	TruncatedBytes int          `json:"truncatedBytes"`
+	Skipped        []Skip       `json:"skipped"`
+	Complete       bool         `json:"complete"`
+}
+
+// FallbackUse records that a fallback provider reviewed, and why.
+type FallbackUse struct {
+	Reviewer Reviewer `json:"reviewer"`
+	Reason   string   `json:"reason"`
 }
 
 // NewCoverage starts a coverage record for one review of diffText by the given
@@ -85,6 +94,9 @@ func (c *Coverage) Add(o Coverage, first bool) {
 	c.Chunks += o.Chunks
 	c.LLMCalls += o.LLMCalls
 	c.CachedChunks += o.CachedChunks
+	if c.Fallback == nil {
+		c.Fallback = o.Fallback
+	}
 	c.TruncatedBytes += o.TruncatedBytes
 	c.Skipped = append(c.Skipped, o.Skipped...)
 	if first {
@@ -122,9 +134,13 @@ func (c Coverage) Describe(llmMs int64) string {
 		if c.CachedChunks > 0 {
 			chunks += fmt.Sprintf(" (%d from cache)", c.CachedChunks)
 		}
-		return fmt.Sprintf("Reviewed %s in %s by %s — %s, %.1fs",
+		line := fmt.Sprintf("Reviewed %s in %s by %s — %s, %.1fs",
 			size, chunks, reviewerLabel(c.Reviewer),
 			plural(c.LLMCalls, "LLM call"), float64(llmMs)/1000)
+		if c.Fallback != nil {
+			line += fmt.Sprintf(" (fell back to %s/%s: %s)", c.Fallback.Reviewer.Provider, c.Fallback.Reviewer.Model, c.Fallback.Reason)
+		}
+		return line
 	}
 }
 

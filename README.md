@@ -195,6 +195,7 @@ All review subcommands accept these flags:
 | `--paths` | Include file path globs (comma-separated) | `**/*` |
 | `--exclude` | Exclude file path globs (comma-separated) | `vendor/**`, `**/*.gen.go`, `**/dist/**` |
 | `--rules` | Rules file path | |
+| `--fallback` | `provider:model` to review with when the primary provider fails (auth, retries exhausted, unreachable) | |
 | `--baseline` | Baseline of accepted findings; `none` reports them all | `.prism-baseline.json` at the repo root |
 | `--no-redact` | Disable secret redaction (prints warning) | `false` |
 
@@ -260,6 +261,7 @@ Example `config.json`:
   "rateLimitRpm": 0,
   "rulesFile": "",
   "baselineFile": "",
+  "fallback": "",
   "cache": {
     "enabled": true,
     "dir": "",
@@ -285,6 +287,7 @@ Example `config.json`:
 | `PRISM_CHUNK_BYTES` | `chunkBytes` — target size of each review chunk (default 24000). One prompt carrying a large diff gets a shallow review, so keep this small |
 | `PRISM_MAX_CONCURRENCY` | `maxConcurrency` — parallel LLM calls per review (0 = provider default) |
 | `PRISM_RATE_LIMIT_RPM` | `rateLimitRpm` — requests per minute cap (0 = provider default) |
+| `PRISM_FALLBACK` | `fallback` — `provider:model` used when the primary provider fails |
 | `PRISM_BASELINE_FILE` | `baselineFile` — baseline path, relative to the repo root (`none` turns it off) |
 | `ANTHROPIC_API_KEY` | Anthropic provider |
 | `OPENAI_API_KEY` | OpenAI provider |
@@ -359,6 +362,18 @@ prism review staged --rules rules.json
 ### Structured Output
 
 Prism asks every provider for its findings in the provider's structured-output mode, constrained to a JSON schema: `response_format` for OpenAI (and OpenAI-compatible servers through the `ollama` provider), `output_config.format` for Anthropic, and `responseSchema` for Gemini. Responses are therefore always valid JSON with valid severities and categories, and the repair call for malformed output is rarely needed. An endpoint that doesn't support it is detected on its first refusal and asked in plain JSON from then on. The live check is `go test -tags integration -run TestStructuredOutputLive ./internal/review`.
+
+### Fallback Provider
+
+An agent can't fix a provider outage, so with only one provider an expired key or a rate-limit storm loses the review gate. Set a fallback:
+
+```json
+{ "fallback": "ollama:llama3.3" }
+```
+
+Prism switches to it when the primary returns an auth error, runs out of retries on rate limits or server errors, can't be reached, or doesn't have the model. It also switches when the primary can't even be created, for example because its API key isn't set. It doesn't switch for a request the endpoint refused for its content (400, 413, 422), since the fallback would refuse it too, or for a cancelled run.
+
+Once switched, the rest of the review uses the fallback. Coverage records it (`coverage.fallback` in JSON, `fell back to …` in the text line), and findings carry the fallback's provider and model. The fallback's results aren't cached, so a later run never replays them as the primary's review. If the fallback fails too, the error names both failures; an auth failure still exits 3. Compare mode is unaffected, since each model there is named explicitly.
 
 ### Switching Providers
 

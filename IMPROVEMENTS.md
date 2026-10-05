@@ -18,7 +18,7 @@ Prism is run by AI coding agents (Claude Code, Codex), not by people at a termin
 | 5 | Finding baseline / suppression | Workflow | High | **Done** |
 | 6 | Native structured output | Accuracy, Tokens | High | **Done** |
 | 7 | Structured fix format | Workflow | High | **Done** |
-| 8 | Fallback provider | Workflow | High | Not started |
+| 8 | Fallback provider | Workflow | High | **Done** |
 | 9 | Delta mode: net-new findings | Workflow | High | Not started |
 | 10 | Skip content not worth reviewing | Tokens, Speed | High | Not started |
 | 11 | Detect truncated responses | Accuracy, Tokens | High | Not started |
@@ -195,7 +195,15 @@ Update the system prompt to ask for this structure. If a model doesn't comply, `
 
 ---
 
-### 8. Fallback provider
+### 8. Fallback provider (DONE)
+
+**Status:** Done.
+- **Setting it:** `fallback` (`provider:model`; also `--fallback` and `PRISM_FALLBACK`) wraps the provider in `providers.Fallback`.
+- **When it switches:** on an auth error, retries exhausted (429/5xx), a transport failure or a 404, and when the primary can't be created (a missing key). It doesn't switch on a cancelled run or on 400/413/422. The switch is sticky for the run, and the fallback is created only if needed.
+- **Reporting:** coverage gains `fallback: {reviewer, reason}`, the fallback joins `coverage.reviewer`, and the text line says `fell back to …`. Findings carry the fallback's provenance.
+- **Cache:** the fallback's answers aren't cached, whether a single diff, a chunk or a codebase file, so the primary's review is never replaced by the fallback's on a later run.
+- **Failure:** if the fallback fails too, the error wraps both, and `IsAuthError` still sees a primary auth failure (exit 3).
+- **Scope:** compare mode doesn't use a fallback.
 
 **Problem:** If the primary provider returns an auth error or runs out of retries, the review fails with exit 3 or 4. An agent can't fix a provider outage. It either stops and asks the user or skips the review, and the review gate is lost either way.
 

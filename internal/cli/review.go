@@ -36,6 +36,7 @@ var (
 	flagMaxFindings      int
 	flagRules            string
 	flagBaseline         string
+	flagFallback         string
 	flagNoRedact         bool
 )
 
@@ -55,6 +56,7 @@ func addReviewFlags(cmd *cobra.Command) {
 	cmd.Flags().StringVar(&flagFailOn, "fail-on", "", "Fail on severity threshold (none, low, medium, high)")
 	cmd.Flags().IntVar(&flagMaxFindings, "max-findings", 0, "Maximum number of findings")
 	cmd.Flags().StringVar(&flagRules, "rules", "", "Rules file path")
+	cmd.Flags().StringVar(&flagFallback, "fallback", "", "provider:model to review with when the primary provider fails (auth, retries exhausted, unreachable)")
 	cmd.Flags().StringVar(&flagBaseline, "baseline", "", "Baseline of accepted findings (default .prism-baseline.json at the repo root; \"none\" to report them all)")
 	cmd.Flags().BoolVar(&flagNoRedact, "no-redact", false, "Disable secret redaction (use with caution)")
 }
@@ -93,6 +95,9 @@ func buildOverrides() map[string]string {
 	}
 	if flagBaseline != "" {
 		m["baselineFile"] = flagBaseline
+	}
+	if flagFallback != "" {
+		m["fallback"] = flagFallback
 	}
 	if flagCompare != "" {
 		m["compare"] = flagCompare

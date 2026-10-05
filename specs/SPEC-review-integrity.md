@@ -59,8 +59,9 @@ review path: single, chunked, compare, codebase, per-commit range, and
 | `files` | int | Distinct files in the reviewed diff. |
 | `bytes` | int | Bytes of diff reviewed, after exclusion and truncation. |
 | `chunks` | int | Review units sent to a model: 1 for an unchunked diff, N for chunked, 0 when nothing was sent. |
-| `llmCalls` | int | Model calls made in this run, including repair passes. 0 when the result came entirely from cache. |
+| `llmCalls` | int | Model calls made in this run, including repair passes and a failed call to the primary provider before its fallback answered. Retries of one call inside a provider are not counted. 0 when the result came entirely from cache. |
 | `cacheHit` | bool | All the findings were replayed from cache: no chunk was sent. |
+| `fallback` | `{reviewer: {provider, model}, reason}` | Present when the configured provider failed and the fallback provider reviewed instead (all or part of the input); `reason` is the primary's failure. The fallback is also listed in `reviewer`. |
 | `cachedChunks` | int | Of `chunks`, how many were replayed from cache instead of sent. Equals `chunks` when `cacheHit` is true. |
 | `truncatedBytes` | int | Bytes cut by `maxDiffBytes` (0 when not truncated). |
 | `skipped` | `[]{target, reason}` | Parts of the input not reviewed. For per-commit range, `target` is the short commit SHA. For truncation, `target` is `"diff"`. For a failed chunk, `target` is `"chunk 2/5 (a.go, b.go)"`: its position and up to five of its files. |

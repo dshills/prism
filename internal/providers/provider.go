@@ -25,6 +25,18 @@ type ReviewResponse struct {
 	Provider string
 	// Model identifies the concrete model used (e.g. "claude-opus-4-5").
 	Model string
+	// Fallback is true when a Fallback reviewer's fallback provider, not the
+	// configured one, produced this response.
+	Fallback bool
+	// Calls is how many model calls the response took, when more than one: a
+	// Fallback reviewer's failed call to its primary, then the fallback. Zero
+	// means one. Retries of one call inside a provider are not counted.
+	Calls int
+}
+
+// CallsOf is how many model calls a Review made, from its response.
+func CallsOf(resp ReviewResponse) int {
+	return max(resp.Calls, 1)
 }
 
 // Reviewer is the provider abstraction interface.

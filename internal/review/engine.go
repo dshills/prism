@@ -42,6 +42,45 @@ type rawFinding struct {
 // replace it to review without a real provider.
 var newProvider = providers.New
 
+// newReviewer is the reviewer for cfg: its provider, wrapped with cfg's
+// fallback provider when one is set (providers.Fallback). With a fallback, a
+// primary that cannot even be created (a missing API key) is not an error:
+// the fallback reviews from the start.
+func newReviewer(cfg config.Config) (providers.Reviewer, error) {
+	primary, err := newProvider(cfg.Provider, cfg.Model)
+	if cfg.Fallback == "" {
+		if err != nil {
+			return nil, fmt.Errorf("creating provider: %w", err)
+		}
+		return primary, nil
+	}
+	fbProvider, fbModel, perr := parseModelSpec(cfg.Fallback)
+	if perr != nil {
+		return nil, fmt.Errorf("fallback: %w", perr)
+	}
+	create := func() (providers.Reviewer, error) { return newProvider(fbProvider, fbModel) }
+	return providers.NewFallback(primary, err, cfg.Provider+":"+cfg.Model, cfg.Fallback, create), nil
+}
+
+// noteFallback records in cov that reviewer switched to its fallback, if it
+// did.
+func noteFallback(cov *Coverage, reviewer providers.Reviewer) {
+	fb, ok := reviewer.(*providers.Fallback)
+	if !ok {
+		return
+	}
+	label, reason, used := fb.FellBack()
+	if !used {
+		return
+	}
+	provider, model, _ := strings.Cut(label, ":")
+	r := Reviewer{Provider: provider, Model: model}
+	if !containsReviewer(cov.Reviewer, r) {
+		cov.Reviewer = append(cov.Reviewer, r)
+	}
+	cov.Fallback = &FallbackUse{Reviewer: r, Reason: reason}
+}
+
 // reviewOpts controls differences between Run() and RunCodebase() pipelines.
 type reviewOpts struct {
 	builder     PromptBuilder // nil = default diff prompts
@@ -189,10 +228,11 @@ func reviewWholeCached(ctx context.Context, redactedDiff string, files []string,
 		}
 	}
 
-	provider, err := newProvider(cfg.Provider, cfg.Model)
+	provider, err := newReviewer(cfg)
 	if err != nil {
-		return nil, 0, fmt.Errorf("creating provider: %w", err)
+		return nil, 0, err
 	}
+	defer noteFallback(cov, provider)
 	sysPr, userPr := builder(redactedDiff, files, cfg, rules)
 
 	llmStart := time.Now()
@@ -204,7 +244,7 @@ func reviewWholeCached(ctx context.Context, redactedDiff string, files []string,
 	}
 
 	resp, err := provider.Review(ctx, req)
-	cov.LLMCalls++
+	cov.LLMCalls += providers.CallsOf(resp)
 	if err != nil {
 		return nil, 0, fmt.Errorf("provider review: %w", err)
 	}
@@ -224,7 +264,7 @@ func reviewWholeCached(ctx context.Context, redactedDiff string, files []string,
 			Output:       findingsOutput,
 		}
 		resp2, err2 := provider.Review(ctx, repairReq)
-		cov.LLMCalls++
+		cov.LLMCalls += providers.CallsOf(resp2)
 		if err2 != nil {
 			return nil, llmMs, fmt.Errorf("repair pass failed: %w (original error: %w)", err2, err)
 		}
@@ -237,7 +277,9 @@ func reviewWholeCached(ctx context.Context, redactedDiff string, files []string,
 	findings = stampProvenance(findings, resp.Provider, resp.Model)
 	SortFindings(findings)
 
-	putFindings(rc, cacheKey, findings)
+	if !resp.Fallback { // a fallback's review is not cached as this model's
+		putFindings(rc, cacheKey, findings)
+	}
 	return findings, llmMs, nil
 }
 
@@ -268,26 +310,29 @@ func reviewChunksCached(ctx context.Context, chunks []Chunk, cfg config.Config, 
 		return mergeChunkFindings(perChunk), 0, nil
 	}
 
-	provider, err := newProvider(cfg.Provider, cfg.Model)
+	provider, err := newReviewer(cfg)
 	if err != nil {
-		return nil, 0, fmt.Errorf("creating provider: %w", err)
+		return nil, 0, err
 	}
-	fresh, errs, llmMs, calls := reviewChunks(ctx, chunks, todo, provider, cfg, rules, builder)
-	cov.LLMCalls = calls
+	run := reviewChunks(ctx, chunks, todo, provider, cfg, rules, builder)
+	noteFallback(cov, provider)
+	cov.LLMCalls = run.calls
 	haveResults := cov.CachedChunks > 0
 	for _, i := range todo {
-		if errs[i] == nil {
-			putFindings(rc, keys[i], fresh[i])
-			perChunk[i] = fresh[i]
+		if run.errs[i] == nil {
+			if !run.fallback[i] { // a fallback's review is not cached as this model's
+				putFindings(rc, keys[i], run.findings[i])
+			}
+			perChunk[i] = run.findings[i]
 			haveResults = true
 		}
 	}
-	skips, err := chunkFailures(ctx, chunks, errs, haveResults)
+	skips, err := chunkFailures(ctx, chunks, run.errs, haveResults)
 	if err != nil {
-		return nil, llmMs, fmt.Errorf("chunked review: %w", err)
+		return nil, run.llmMs, fmt.Errorf("chunked review: %w", err)
 	}
 	cov.Skipped = append(cov.Skipped, skips...)
-	return mergeChunkFindings(perChunk), llmMs, nil
+	return mergeChunkFindings(perChunk), run.llmMs, nil
 }
 
 // putFindings stores findings under key in the rawFinding form parseFindings
@@ -522,15 +567,17 @@ func runCodebaseWithFileCache(
 		filteredDiff := strings.Join(uncachedSections, "")
 
 		// Step 7: Run the chunked review on uncached sections only.
-		provider, err := newProvider(cfg.Provider, cfg.Model)
+		provider, err := newReviewer(cfg.Config)
 		if err != nil {
-			return nil, fmt.Errorf("creating provider: %w", err)
+			return nil, err
 		}
 
 		chunks := SplitIntoChunks(filteredDiff, cfg.ChunkBytes)
 		cov.Chunks = len(chunks)
-		perChunk, errs, ms, calls := reviewChunks(ctx, chunks, nil, provider, cfg.Config, rules, codebaseBuilder)
-		llmMs, cov.LLMCalls = ms, calls
+		run := reviewChunks(ctx, chunks, nil, provider, cfg.Config, rules, codebaseBuilder)
+		noteFallback(&cov, provider)
+		llmMs, cov.LLMCalls = run.llmMs, run.calls
+		perChunk, errs := run.findings, run.errs
 
 		// Step 8: Store fresh findings per file for future cache hits (FR-4),
 		// only for the chunks that succeeded: a failed chunk's files must not
@@ -538,7 +585,9 @@ func runCodebaseWithFileCache(
 		haveResults := len(uncachedSections) < len(sections) // some files came from cache
 		for i, c := range chunks {
 			if errs[i] == nil {
-				storeFindingsPerFile(reviewCache, diffutil.SplitSections(c.Diff), perChunk[i], cfg.Provider, cfg.Model, prompt)
+				if !run.fallback[i] { // a fallback's review is not cached as this model's
+					storeFindingsPerFile(reviewCache, diffutil.SplitSections(c.Diff), perChunk[i], cfg.Provider, cfg.Model, prompt)
+				}
 				haveResults = true
 			}
 		}

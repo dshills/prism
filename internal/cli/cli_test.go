@@ -27,6 +27,7 @@ func resetFlags() {
 	flagMaxFindings = 0
 	flagRules = ""
 	flagBaseline = ""
+	flagFallback = ""
 	flagNoRedact = false
 	flagParent = ""
 	flagMergeBase = false
