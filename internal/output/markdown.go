@@ -41,6 +41,7 @@ func (m *MarkdownWriter) Write(w io.Writer, report *review.Report) error {
 			ew.println("No issues found. :white_check_mark:")
 		}
 		writeMarkdownDiscarded(ew, report)
+		writeMarkdownSuppressed(ew, report)
 		return ew.err
 	}
 
@@ -61,11 +62,11 @@ func (m *MarkdownWriter) Write(w io.Writer, report *review.Report) error {
 			loc := mdPrimaryLocation(f)
 			ew.printf("### %s\n\n", f.Title)
 			if loc.Commit != "" {
-				ew.printf("**`%s:%d-%d`** | %s | Confidence: %.0f%% | Commit: `%s`\n\n",
-					loc.Path, loc.Lines.Start, loc.Lines.End, f.Category, f.Confidence*100, loc.Commit)
+				ew.printf("**`%s:%d-%d`** | %s | Confidence: %.0f%% | Commit: `%s` | ID: `%s`\n\n",
+					loc.Path, loc.Lines.Start, loc.Lines.End, f.Category, f.Confidence*100, loc.Commit, f.ID)
 			} else {
-				ew.printf("**`%s:%d-%d`** | %s | Confidence: %.0f%%\n\n",
-					loc.Path, loc.Lines.Start, loc.Lines.End, f.Category, f.Confidence*100)
+				ew.printf("**`%s:%d-%d`** | %s | Confidence: %.0f%% | ID: `%s`\n\n",
+					loc.Path, loc.Lines.Start, loc.Lines.End, f.Category, f.Confidence*100, f.ID)
 			}
 			ew.printf("%s\n\n", f.Message)
 
@@ -91,6 +92,7 @@ func (m *MarkdownWriter) Write(w io.Writer, report *review.Report) error {
 		report.Timing.TotalMs, report.Timing.GitMs, report.Timing.LLMMs)
 
 	writeMarkdownDiscarded(ew, report)
+	writeMarkdownSuppressed(ew, report)
 	return ew.err
 }
 
@@ -195,6 +197,20 @@ func inferLang(path string) string {
 // The errWriter type is shared across the output package since
 // both text.go and markdown.go are in package output.
 // No need to redeclare it here - it's defined in text.go.
+
+// writeMarkdownSuppressed lists findings accepted by the baseline or an
+// inline prism:ignore.
+func writeMarkdownSuppressed(ew *errWriter, report *review.Report) {
+	if len(report.Suppressed) == 0 {
+		return
+	}
+	ew.printf("\n<details><summary>Suppressed %d accepted finding(s)</summary>\n\n", len(report.Suppressed))
+	for _, s := range report.Suppressed {
+		loc := mdPrimaryLocation(s.Finding)
+		ew.printf("- `%s:%d` %s — %s%s\n", loc.Path, loc.Lines.Start, s.Finding.Title, suppressionSource(s), suppressionReason(s))
+	}
+	ew.println("\n</details>")
+}
 
 // writeMarkdownDiscarded lists findings that failed verification (FR-7).
 func writeMarkdownDiscarded(ew *errWriter, report *review.Report) {

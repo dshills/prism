@@ -158,20 +158,18 @@ func reviewPipeline(ctx context.Context, diff gitctx.DiffResult, cfg config.Conf
 	// Apply rules severity overrides
 	findings = ApplySeverityOverrides(findings, rules)
 
-	// FR-5/FR-6: verify after the cache, which holds unverified findings so a
-	// changed tree re-verifies (FR-8), and before the limit, so discarded
-	// findings do not use it up.
-	findings, discarded := VerifyFindings(ctx, findings, diff, cfg)
-
-	// Limit findings
-	if cfg.MaxFindings > 0 && len(findings) > cfg.MaxFindings {
-		findings = findings[:cfg.MaxFindings]
+	// Verify, suppress and limit after the cache, which holds unverified
+	// findings so a changed tree re-verifies (FR-8).
+	findings, discarded, suppressed, err := FinalizeFindings(ctx, findings, diff, cfg)
+	if err != nil {
+		return nil, err
 	}
 
 	report := BuildReport(diff, findings, llmMs, time.Since(startTime).Milliseconds())
 	cov.Finalize()
 	report.Coverage = cov
 	report.Discarded = discarded
+	report.Suppressed = suppressed
 	return report, nil
 }
 
@@ -395,7 +393,6 @@ func findingsToRaw(findings []Finding) []rawFinding {
 	return raw
 }
 
-
 // GenerateRunID creates a unique run identifier.
 func GenerateRunID() string {
 	h := sha256.Sum256([]byte(fmt.Sprintf("%d", time.Now().UnixNano())))
@@ -525,15 +522,15 @@ func runCodebaseWithFileCache(
 	// Step 11: Deduplicate (safety net for any cross-chunk duplicates).
 	allFindings = DeduplicateFindings(allFindings)
 
-	// Verify against the code (FR-5/FR-6); cached findings re-verify too.
-	allFindings, discarded := VerifyFindings(ctx, allFindings, diff, cfg.Config)
-
 	// Step 12: Sort high → medium → low, then by path, then by line.
 	SortFindings(allFindings)
 
-	// Step 13: Enforce MaxFindings on the merged set (FR-9).
-	if cfg.MaxFindings > 0 && len(allFindings) > cfg.MaxFindings {
-		allFindings = allFindings[:cfg.MaxFindings]
+	// Step 13: Verify against the code (FR-5/FR-6; cached findings re-verify
+	// too), suppress accepted findings, and enforce MaxFindings on the merged
+	// set (FR-9).
+	allFindings, discarded, suppressed, err := FinalizeFindings(ctx, allFindings, diff, cfg.Config)
+	if err != nil {
+		return nil, err
 	}
 
 	// Every file came from the per-file cache: nothing was sent to a model.
@@ -546,6 +543,7 @@ func runCodebaseWithFileCache(
 	cov.Finalize()
 	report.Coverage = cov
 	report.Discarded = discarded
+	report.Suppressed = suppressed
 	return report, nil
 }
 
@@ -621,6 +619,7 @@ func BuildReport(diff gitctx.DiffResult, findings []Finding, llmMs, totalMs int6
 		},
 		Provenance: CollectProvenance(findings),
 		Discarded:  []Discard{},
+		Suppressed: []Suppression{},
 	}
 }
 

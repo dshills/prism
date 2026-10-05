@@ -138,6 +138,7 @@ var githubCmd = &cobra.Command{
 
 		// Fail-on threshold first, then exit 5 for a partial review (a
 		// truncated diff or a failed chunk), as review does (FR-3).
+		rememberReport(report, cfg)
 		exitCode = finishExit(report, cfg.FailOn, flagAllowIncomplete)
 		return nil
 	},

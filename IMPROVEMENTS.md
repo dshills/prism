@@ -15,7 +15,7 @@ Prism is run by AI coding agents (Claude Code, Codex), not by people at a termin
 | 2 | Per-chunk caching for diff modes | Speed, Tokens | High | **Done** |
 | 3 | Keep partial results when a chunk fails | Speed, Tokens | High | **Done** |
 | 4 | Stable finding fingerprints | Accuracy, Workflow | High | **Done** |
-| 5 | Finding baseline / suppression | Workflow | High | Not started |
+| 5 | Finding baseline / suppression | Workflow | High | **Done** |
 | 6 | Native structured output | Accuracy, Tokens | High | Not started |
 | 7 | Structured fix format | Workflow | High | Not started |
 | 8 | Fallback provider | Workflow | High | Not started |
@@ -102,7 +102,19 @@ The limit: a diff that fits in one chunk (24 KB by default) is still cached as a
 
 ---
 
-### 5. Finding baseline / suppression
+### 5. Finding baseline / suppression (DONE)
+
+**Status:** Done.
+- **Baseline file:** `.prism-baseline.json` at the repo root (`baselineFile`, `--baseline`, `PRISM_BASELINE_FILE`; `none` turns it off) is managed by `prism baseline add/remove/show`. `add` looks the ID up in the repo's last review, which the CLI keeps in the cache dir, and records the finding's path, category, title, reason and date. `--force` adds an ID that isn't in that review.
+- **Inline:** `prism:ignore [categories] ["reason"]` must start a real comment, and any other text after the token rejects the directive.
+  - **How it's found:** a small per-language lexer (comment and string syntax by file extension, including each multi-line string's escape rule: none for Go raw strings, backslash, or doubled quotes for SQL) carries strings and block comments across lines, so string data can't suppress a finding. Where a language's rule is unclear, it keeps a string open longer, which can only hide a directive.
+  - **Mid-file hunks:** for a language with multi-line strings or block comments, a hunk below line 1 is lexed as part of the whole file (working tree, index or reviewed revision), after checking the file matches the diff. Where it can't be read, those hunks honor no directives; the finding is reported and the baseline still applies.
+  - **Coverage:** a directive covers its own line, and the line below when the comment is alone on its line.
+  - **Best-effort, by decision:** the lexer doesn't model Rust raw and multi-line strings, YAML block scalars, or heredocs (shell, Ruby, Perl, PHP), so directive-shaped text inside them counts as a directive. Prism review flagged these as high. They were accepted because whoever can write such a string can write a real comment, so it isn't an escalation; exact suppression is the baseline's job. A stricter follow-up would honor directives only where an exact lexer exists (Go's `go/scanner`), language by language.
+- **Where it runs:** both mechanisms run in `review.FinalizeFindings`, the step every path ends in, after verification and before `maxFindings`. They therefore apply to cache replays, chunked, codebase, compare, per-commit, GitHub PR and `pkg/prism` reviews alike.
+- **Reporting:** suppressed findings leave `findings` and the exit code but are listed under `suppressed` (JSON), "Suppressed" (text and markdown), and as SARIF results with `suppressions` (`external` for the baseline, `inSource` inline).
+- **IDs visible:** text and markdown output now show each finding's ID, so an agent can baseline it.
+- **Failure modes:** a baseline that can't be parsed fails the review rather than silently reporting every accepted finding again. Saves are atomic (temp file plus rename). Last reports are kept only when the repository is known, so a GitHub PR review isn't filed under the working directory's repo; baselining from one needs `--force`. Reports are written 0600 in a 0700 directory, since they hold evidence.
 
 **Problem:** Every run reports every finding, and agents remember nothing between sessions. An agent sees the same accepted finding on every run. It either keeps trying to fix it or asks the user about it again. The agent needs to know, *before it starts*, which findings have already been settled.
 

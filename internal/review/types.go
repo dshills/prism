@@ -147,6 +147,10 @@ type Report struct {
 	// Discarded lists findings that failed verification against the code,
 	// each with the reason. They are not in Findings or Summary (FR-7).
 	Discarded []Discard `json:"discarded"`
+	// Suppressed lists findings accepted by the baseline or an inline
+	// prism:ignore, with where the acceptance came from. They are not in
+	// Findings or Summary, so they never decide the exit code.
+	Suppressed []Suppression `json:"suppressed"`
 }
 
 // Discard is a finding removed by verification, and why.

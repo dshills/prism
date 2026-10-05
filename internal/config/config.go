@@ -26,12 +26,16 @@ type Config struct {
 	// VerifyFindings checks findings against the code before reporting them
 	// (evidence and Go compile claims). nil means the default, true; a pointer
 	// so an explicit false in a config file is distinguishable from unset.
-	VerifyFindings *bool         `json:"verifyFindings,omitempty"`
-	MaxConcurrency int           `json:"maxConcurrency,omitempty"`
-	RateLimitRPM   int           `json:"rateLimitRpm,omitempty"`
-	RulesFile      string        `json:"rulesFile,omitempty"`
-	Cache          CacheConfig   `json:"cache"`
-	Privacy        PrivacyConfig `json:"privacy"`
+	VerifyFindings *bool  `json:"verifyFindings,omitempty"`
+	MaxConcurrency int    `json:"maxConcurrency,omitempty"`
+	RateLimitRPM   int    `json:"rateLimitRpm,omitempty"`
+	RulesFile      string `json:"rulesFile,omitempty"`
+	// BaselineFile is the baseline of accepted findings, relative to the
+	// repository root unless absolute. Empty means .prism-baseline.json;
+	// "none" turns the baseline off.
+	BaselineFile string        `json:"baselineFile,omitempty"`
+	Cache        CacheConfig   `json:"cache"`
+	Privacy      PrivacyConfig `json:"privacy"`
 }
 
 // CacheConfig controls caching behavior.
@@ -203,6 +207,9 @@ func mergeFile(dst *Config, src Config) {
 	if src.RulesFile != "" {
 		dst.RulesFile = src.RulesFile
 	}
+	if src.BaselineFile != "" {
+		dst.BaselineFile = src.BaselineFile
+	}
 	if src.Cache.Dir != "" {
 		dst.Cache.Dir = src.Cache.Dir
 	}
@@ -249,6 +256,9 @@ func mergeEnv(cfg *Config) error {
 			return fmt.Errorf("PRISM_CONTEXT_LINES must be an integer, got %q", v)
 		}
 		cfg.ContextLines = n
+	}
+	if v := os.Getenv("PRISM_BASELINE_FILE"); v != "" {
+		cfg.BaselineFile = v
 	}
 	if v := os.Getenv("PRISM_VERIFY_FINDINGS"); v != "" {
 		b, err := strconv.ParseBool(v)
@@ -325,6 +335,9 @@ func mergeOverrides(cfg *Config, overrides map[string]string) {
 	if v, ok := overrides["rulesFile"]; ok && v != "" {
 		cfg.RulesFile = v
 	}
+	if v, ok := overrides["baselineFile"]; ok && v != "" {
+		cfg.BaselineFile = v
+	}
 	if v, ok := overrides["compare"]; ok && v != "" {
 		cfg.Compare = strings.Split(v, ",")
 	}
@@ -373,6 +386,8 @@ func SetField(cfg *Config, key, value string) error {
 		cfg.ChunkBytes = n
 	case "rulesFile":
 		cfg.RulesFile = value
+	case "baselineFile":
+		cfg.BaselineFile = value
 	default:
 		return fmt.Errorf("unknown config key: %s", key)
 	}

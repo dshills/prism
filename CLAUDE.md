@@ -21,7 +21,7 @@ go test -run TestFuncName ./internal/review  # Run a single test
 
 The project follows a diff-centric pipeline:
 
-1. **CLI** (`internal/cli/`) — Cobra-based command parsing. Subcommands: `review` (unstaged/staged/commit/range/snippet), `config` (init/set/show), `models` (list/doctor), `cache` (show/clear), `version`.
+1. **CLI** (`internal/cli/`) — Cobra-based command parsing. Subcommands: `review` (unstaged/staged/commit/range/snippet/codebase), `config` (init/set/show), `models` (list/doctor), `cache` (show/clear), `baseline` (add/remove/show), `hook`, `github`, `version`.
 2. **Git Context** (`internal/gitctx/`) — Extracts diffs from git for all 5 review modes, applies path include/exclude filters, truncates at max-diff-bytes.
 3. **Secret Redaction** (`internal/redact/`) — Regex-based detection of API keys, JWTs, private keys, AWS patterns, GitHub/Slack/Anthropic/OpenAI tokens. Path-based redaction also supported.
 4. **Review Engine** (`internal/review/`) — Contains core types (Finding, Report, Severity, etc.), prompt assembly, LLM response JSON parsing, one repair pass on invalid response, stable finding ID generation. Automatically chunks large diffs (>100KB) into per-file chunks reviewed in parallel (bounded concurrency of 4), then merges/deduplicates findings. Includes compare mode (`compare.go`) for multi-model review with fuzzy finding matching, and rules pack support (`rules.go`) for severity overrides, focus areas, and required checks.
@@ -52,6 +52,10 @@ type Reviewer interface {
 ### Finding IDs
 
 IDs are fingerprints of `path + category + normalized evidence + enclosing declaration` (`internal/review/fingerprint.go`). The declaration is the nearest line at or above the evidence that starts one (git's hunk-header rule), taken from the hunk or from the hunk header, so it does not depend on diff context size. The same issue keeps its ID when the model rewords the title or lines shift, and identical code in two functions gets two IDs. Two findings on the same code in the same declaration and category share an ID (deduplication matches ID + title + start line, so both are kept). Findings without evidence fall back to `path + title + start line`. SARIF emits the ID under `partialFingerprints["prismFindingId/v1"]`.
+
+### Suppression
+
+Every review path ends in `review.FinalizeFindings`: verify findings, drop those accepted by an inline `prism:ignore` comment (`internal/review/ignore.go`) or the repo's `.prism-baseline.json` (`internal/review/baseline.go`), then apply `maxFindings`. Suppressed findings go in `Report.Suppressed`, never in `Findings`, so they don't affect the exit code. The CLI keeps each repo's last report in the cache dir (`reports/`), so `prism baseline add <id>` can record what the ID was.
 
 ## Configuration
 

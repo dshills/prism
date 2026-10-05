@@ -320,13 +320,14 @@ func runCompare(ctx context.Context, diff gitctx.DiffResult, cfg config.Config, 
 	if err != nil {
 		return nil, err
 	}
-	findings, discarded := review.VerifyFindings(ctx, cr.All, diff, cfg)
-	if cfg.MaxFindings > 0 && len(findings) > cfg.MaxFindings {
-		findings = findings[:cfg.MaxFindings]
+	findings, discarded, suppressed, err := review.FinalizeFindings(ctx, cr.All, diff, cfg)
+	if err != nil {
+		return nil, err
 	}
 	_ = maxFindingsPerFile
 	report := review.BuildReport(diff, findings, cr.LLMMs, 0)
 	report.Discarded = discarded
+	report.Suppressed = suppressed
 	report.Provenance = compareProvenance(models)
 	report.Coverage = review.CompareCoverage(review.ReviewersFromSpecs(models), len(diff.Files), diff.ReviewedBytes(), diff.TruncatedBytes, cr.Calls)
 	return report, nil
@@ -344,6 +345,7 @@ func runPerCommit(ctx context.Context, opts ReviewOptions, cfg config.Config) (*
 		cov         = review.NewCoverage(review.ConfigReviewer(cfg.Provider, cfg.Model), 0, 0, 0)
 		reviewed    int
 		discarded   = []review.Discard{}
+		suppressed  = []review.Suppression{}
 	)
 	err := withRepoPathNoResult(opts.RepoPath, func() error {
 		commits, err := gitctx.ListCommits(opts.Revision, opts.MergeBase)
@@ -382,6 +384,7 @@ func runPerCommit(ctx context.Context, opts ReviewOptions, cfg config.Config) (*
 			}
 			allFindings = append(allFindings, report.Findings...)
 			discarded = append(discarded, review.StampCommit(report.Discarded, shortSHA)...)
+			suppressed = append(suppressed, review.StampSuppressedCommit(report.Suppressed, shortSHA)...)
 			totalLLMMs += report.Timing.LLMMs
 		}
 		meta, _ = gitctx.GetRepoMeta(ctx)
@@ -399,6 +402,7 @@ func runPerCommit(ctx context.Context, opts ReviewOptions, cfg config.Config) (*
 	cov.Finalize()
 	report.Coverage = cov
 	report.Discarded = discarded
+	report.Suppressed = suppressed
 	return report, nil
 }
 

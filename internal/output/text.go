@@ -66,8 +66,8 @@ func (t *TextWriter) Write(w io.Writer, report *review.Report) error {
 				ew.printf("\n  %s:%d-%d  %s\n",
 					loc.Path, loc.Lines.Start, loc.Lines.End, f.Title)
 			}
-			ew.printf("  Category: %s | Confidence: %.0f%%\n",
-				f.Category, f.Confidence*100)
+			ew.printf("  Category: %s | Confidence: %.0f%% | ID: %s\n",
+				f.Category, f.Confidence*100, f.ID)
 
 			// Message (indented, wrapped)
 			for _, line := range wrapText(f.Message, 70) {
@@ -99,6 +99,14 @@ func writeTextFooter(ew *errWriter, report *review.Report) error {
 			ew.printf("  %s:%d  %s — %s\n", loc.Path, loc.Lines.Start, d.Finding.Title, d.Reason)
 		}
 	}
+	// Accepted findings are listed too, so the report says what it left out.
+	if n := len(report.Suppressed); n > 0 {
+		ew.printf("\nSuppressed %d accepted finding(s):\n", n)
+		for _, s := range report.Suppressed {
+			loc := primaryLocation(s.Finding)
+			ew.printf("  %s:%d  %s — %s%s\n", loc.Path, loc.Lines.Start, s.Finding.Title, suppressionSource(s), suppressionReason(s))
+		}
+	}
 	ew.printf("\n%s\n", strings.Repeat("─", 60))
 	if line := report.Coverage.Describe(report.Timing.LLMMs); line != "" {
 		ew.println(line)
@@ -109,6 +117,21 @@ func writeTextFooter(ew *errWriter, report *review.Report) error {
 	ew.printf("Completed in %dms (git: %dms, LLM: %dms)\n",
 		report.Timing.TotalMs, report.Timing.GitMs, report.Timing.LLMMs)
 	return ew.err
+}
+
+// suppressionSource names where a suppression came from.
+func suppressionSource(s review.Suppression) string {
+	if s.Source == review.SuppressedInline {
+		return "prism:ignore"
+	}
+	return "baseline"
+}
+
+func suppressionReason(s review.Suppression) string {
+	if s.Reason == "" {
+		return ""
+	}
+	return ": " + s.Reason
 }
 
 // errWriter wraps an io.Writer and captures the first error.

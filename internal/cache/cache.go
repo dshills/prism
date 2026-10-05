@@ -184,6 +184,15 @@ func (c *Cache) entryPath(key string) string {
 	return filepath.Join(c.dir, HashKey(key)+".json")
 }
 
+// ResolveDir is the cache directory for a configured dir: dir itself, or the
+// platform default when it is empty.
+func ResolveDir(dir string) (string, error) {
+	if dir != "" {
+		return dir, nil
+	}
+	return defaultCacheDir()
+}
+
 func defaultCacheDir() (string, error) {
 	if xdg := os.Getenv("XDG_CACHE_HOME"); xdg != "" {
 		return filepath.Join(xdg, "prism"), nil

@@ -104,9 +104,42 @@ type sarifResult struct {
 	// PartialFingerprints carries the finding's stable ID, so GitHub code
 	// scanning and other consumers track the same issue across runs even
 	// when its lines move.
-	PartialFingerprints map[string]string      `json:"partialFingerprints,omitempty"`
-	Fixes               []sarifFix             `json:"fixes,omitempty"`
-	Properties          *sarifResultProperties `json:"properties,omitempty"`
+	PartialFingerprints map[string]string `json:"partialFingerprints,omitempty"`
+	Fixes               []sarifFix        `json:"fixes,omitempty"`
+	// Suppressions marks a finding accepted by the baseline (external) or an
+	// inline prism:ignore (inSource). Code scanning shows it as dismissed.
+	Suppressions []sarifSuppression     `json:"suppressions,omitempty"`
+	Properties   *sarifResultProperties `json:"properties,omitempty"`
+}
+
+type sarifSuppression struct {
+	Kind          string `json:"kind"`
+	Justification string `json:"justification,omitempty"`
+}
+
+// sarifEntry is a finding to emit, with its suppression when it has one.
+type sarifEntry struct {
+	finding    review.Finding
+	suppressed *review.Suppression
+}
+
+func sarifEntries(report *review.Report) []sarifEntry {
+	out := make([]sarifEntry, 0, len(report.Findings)+len(report.Suppressed))
+	for _, f := range report.Findings {
+		out = append(out, sarifEntry{finding: f})
+	}
+	for i := range report.Suppressed {
+		out = append(out, sarifEntry{finding: report.Suppressed[i].Finding, suppressed: &report.Suppressed[i]})
+	}
+	return out
+}
+
+func sarifSuppressionFor(s *review.Suppression) sarifSuppression {
+	kind := "external"
+	if s.Source == review.SuppressedInline {
+		kind = "inSource"
+	}
+	return sarifSuppression{Kind: kind, Justification: s.Reason}
 }
 
 // sarifFingerprintKey names prism's finding ID among a result's partial
@@ -153,7 +186,9 @@ func buildSARIF(report *review.Report) sarifLog {
 	rulesMap := make(map[string]sarifRule)
 	var results []sarifResult
 
-	for _, f := range report.Findings {
+	entries := sarifEntries(report)
+	for _, e := range entries {
+		f := e.finding
 		ruleID := generateRuleID(f)
 
 		// Register rule if not seen
@@ -202,14 +237,18 @@ func buildSARIF(report *review.Report) sarifLog {
 			}
 		}
 
+		if e.suppressed != nil {
+			result.Suppressions = []sarifSuppression{sarifSuppressionFor(e.suppressed)}
+		}
+
 		results = append(results, result)
 	}
 
 	// Collect rules in stable order
 	var rules []sarifRule
 	seen := make(map[string]bool)
-	for _, f := range report.Findings {
-		rid := generateRuleID(f)
+	for _, e := range entries {
+		rid := generateRuleID(e.finding)
 		if !seen[rid] {
 			seen[rid] = true
 			rules = append(rules, rulesMap[rid])

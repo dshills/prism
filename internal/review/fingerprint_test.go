@@ -132,7 +132,7 @@ func TestIdentifyFindings_AnchorIsTheDeclaration(t *testing.T) {
 
 	edited := append([]string(nil), twoReturns...)
 	edited[1] = "	if err := readAll(); err != nil {" // the line right above it
-	edited[6] = "func saveAll() error {"           // another function
+	edited[6] = "func saveAll() error {"             // another function
 	if after := identified(addedSection("a.go", 1, edited...), f)[0].ID; after != before {
 		t.Error("an edit inside the function changed the ID")
 	}

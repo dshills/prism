@@ -35,6 +35,7 @@ var (
 	flagFailOn           string
 	flagMaxFindings      int
 	flagRules            string
+	flagBaseline         string
 	flagNoRedact         bool
 )
 
@@ -54,6 +55,7 @@ func addReviewFlags(cmd *cobra.Command) {
 	cmd.Flags().StringVar(&flagFailOn, "fail-on", "", "Fail on severity threshold (none, low, medium, high)")
 	cmd.Flags().IntVar(&flagMaxFindings, "max-findings", 0, "Maximum number of findings")
 	cmd.Flags().StringVar(&flagRules, "rules", "", "Rules file path")
+	cmd.Flags().StringVar(&flagBaseline, "baseline", "", "Baseline of accepted findings (default .prism-baseline.json at the repo root; \"none\" to report them all)")
 	cmd.Flags().BoolVar(&flagNoRedact, "no-redact", false, "Disable secret redaction (use with caution)")
 }
 
@@ -88,6 +90,9 @@ func buildOverrides() map[string]string {
 	}
 	if flagRules != "" {
 		m["rulesFile"] = flagRules
+	}
+	if flagBaseline != "" {
+		m["baselineFile"] = flagBaseline
 	}
 	if flagCompare != "" {
 		m["compare"] = flagCompare
@@ -162,6 +167,7 @@ func runReview(ctx context.Context, diff gitctx.DiffResult, cfg config.Config) {
 		exitCode = ExitRuntimeError
 		return
 	}
+	rememberReport(report, cfg)
 	exitCode = finishExit(report, cfg.FailOn, flagAllowIncomplete)
 }
 
@@ -197,13 +203,14 @@ func runCompareMode(ctx context.Context, diff gitctx.DiffResult, cfg config.Conf
 		return nil, err
 	}
 
-	findings, discarded := review.VerifyFindings(ctx, cr.All, diff, cfg)
-	if cfg.MaxFindings > 0 && len(findings) > cfg.MaxFindings {
-		findings = findings[:cfg.MaxFindings]
+	findings, discarded, suppressed, err := review.FinalizeFindings(ctx, cr.All, diff, cfg)
+	if err != nil {
+		return nil, err
 	}
 
 	report := review.BuildReport(diff, findings, cr.LLMMs, time.Since(startTime).Milliseconds())
 	report.Discarded = discarded
+	report.Suppressed = suppressed
 	// Overwrite provenance to enumerate every compared model, even ones that
 	// produced zero findings — the list represents who reviewed, not who reported.
 	report.Provenance = compareProvenance(models)
@@ -263,6 +270,7 @@ func runPerCommitReview(ctx context.Context, revRange string, cfg config.Config)
 
 	var allFindings []review.Finding
 	allDiscarded := []review.Discard{}
+	allSuppressed := []review.Suppression{}
 	var totalLLMMs int64
 	// FR-1: coverage summed over reviewed commits; a commit that could not be
 	// reviewed is a skip, which makes the report incomplete.
@@ -316,6 +324,7 @@ func runPerCommitReview(ctx context.Context, revRange string, cfg config.Config)
 
 		allFindings = append(allFindings, report.Findings...)
 		allDiscarded = append(allDiscarded, review.StampCommit(report.Discarded, shortSHA)...)
+		allSuppressed = append(allSuppressed, review.StampSuppressedCommit(report.Suppressed, shortSHA)...)
 		totalLLMMs += report.Timing.LLMMs
 	}
 
@@ -340,12 +349,14 @@ func runPerCommitReview(ctx context.Context, revRange string, cfg config.Config)
 	cov.Finalize()
 	report.Coverage = cov
 	report.Discarded = allDiscarded
+	report.Suppressed = allSuppressed
 
 	if err := output.WriteReport(report, cfg.Format, flagOut); err != nil {
 		fmt.Fprintf(os.Stderr, "Error writing output: %v\n", err)
 		exitCode = ExitRuntimeError
 		return
 	}
+	rememberReport(report, cfg)
 	exitCode = finishExit(report, cfg.FailOn, flagAllowIncomplete)
 }
 
@@ -569,6 +580,7 @@ func runCodebaseReview(ctx context.Context, diff gitctx.DiffResult, cfg config.C
 		exitCode = ExitRuntimeError
 		return
 	}
+	rememberReport(report, cfg)
 	exitCode = finishExit(report, cfg.FailOn, flagAllowIncomplete)
 }
 

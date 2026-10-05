@@ -34,6 +34,7 @@ func Run() int {
 	rootCmd.AddCommand(configCmd)
 	rootCmd.AddCommand(modelsCmd)
 	rootCmd.AddCommand(cacheCmd)
+	rootCmd.AddCommand(baselineCmd)
 	rootCmd.AddCommand(hookCmd)
 	rootCmd.AddCommand(githubCmd)
 	rootCmd.AddCommand(versionCmd)

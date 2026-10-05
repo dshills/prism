@@ -1,0 +1,70 @@
+package review
+
+import (
+	"context"
+	"os"
+	"path/filepath"
+
+	"github.com/dshills/prism/internal/config"
+	"github.com/dshills/prism/internal/gitctx"
+)
+
+// FinalizeFindings is the last step before every report, whatever reviewed
+// the diff: verify findings against the code (FR-5/FR-6), leave out the ones
+// accepted by an inline prism:ignore or the repository's baseline, then apply
+// maxFindings. Discarded and suppressed findings are returned for the report
+// to list; neither uses up the limit or counts toward the exit code.
+//
+// It runs after the cache, which holds findings from before all of this, so
+// accepting a finding takes effect on the next run even when it is replayed.
+// An unreadable baseline is an error, not an empty one.
+func FinalizeFindings(ctx context.Context, findings []Finding, diff gitctx.DiffResult, cfg config.Config) ([]Finding, []Discard, []Suppression, error) {
+	findings, discarded := VerifyFindings(ctx, findings, diff, cfg)
+
+	baseline, err := LoadBaseline(BaselinePath(cfg, diff.Repo.Root))
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	// Directives are read from the code itself, not the redacted text the
+	// model saw: redaction rewrites string contents, which would stop the diff
+	// matching the file it is checked against.
+	findings, inline := applyIgnores(findings, diff.Diff, reviewedFiles(ctx, diff))
+	findings, accepted := applyBaseline(findings, baseline)
+	suppressed := append(append([]Suppression{}, inline...), accepted...)
+
+	if cfg.MaxFindings > 0 && len(findings) > cfg.MaxFindings {
+		findings = findings[:cfg.MaxFindings]
+	}
+	return findings, discarded, suppressed, nil
+}
+
+// reviewedFiles reads a file's whole content as it was reviewed: the working
+// tree for unstaged changes, the index for staged ones, the tip revision for
+// a commit or range. It is nil where that cannot be had (a GitHub PR review,
+// a snippet, no repository), and a codebase review already has whole files.
+func reviewedFiles(ctx context.Context, diff gitctx.DiffResult) fileSource {
+	root := diff.Repo.Root
+	if root == "" {
+		return nil
+	}
+	var rev string
+	switch diff.Mode {
+	case "unstaged":
+		return func(path string) (string, bool) {
+			data, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(path)))
+			return string(data), err == nil
+		}
+	case "staged":
+		rev = "" // ":path" is the index
+	case "commit":
+		rev = diff.Range
+	case "range":
+		rev = rangeTip(diff.Range)
+	default:
+		return nil
+	}
+	return func(path string) (string, bool) {
+		out, err := execGit{}.Run(ctx, root, "show", rev+":"+path)
+		return out, err == nil
+	}
+}

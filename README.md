@@ -169,6 +169,9 @@ prism review staged --fail-on high
 | `prism models doctor` | Validate provider credentials |
 | `prism cache show` | Show cache statistics |
 | `prism cache clear` | Clear cached results |
+| `prism baseline add <id>...` | Accept findings so reviews stop reporting them (`--reason`, `--force`) |
+| `prism baseline remove <id>...` | Stop accepting findings |
+| `prism baseline show` | List accepted findings (`--json`) |
 | `prism hook install` | Install git pre-commit hook |
 | `prism hook uninstall` | Remove git pre-commit hook |
 | `prism version` | Print version |
@@ -192,6 +195,7 @@ All review subcommands accept these flags:
 | `--paths` | Include file path globs (comma-separated) | `**/*` |
 | `--exclude` | Exclude file path globs (comma-separated) | `vendor/**`, `**/*.gen.go`, `**/dist/**` |
 | `--rules` | Rules file path | |
+| `--baseline` | Baseline of accepted findings; `none` reports them all | `.prism-baseline.json` at the repo root |
 | `--no-redact` | Disable secret redaction (prints warning) | `false` |
 
 **Commit-specific:**
@@ -255,6 +259,7 @@ Example `config.json`:
   "maxConcurrency": 0,
   "rateLimitRpm": 0,
   "rulesFile": "",
+  "baselineFile": "",
   "cache": {
     "enabled": true,
     "dir": "",
@@ -280,9 +285,40 @@ Example `config.json`:
 | `PRISM_CHUNK_BYTES` | `chunkBytes` — target size of each review chunk (default 24000). One prompt carrying a large diff gets a shallow review, so keep this small |
 | `PRISM_MAX_CONCURRENCY` | `maxConcurrency` — parallel LLM calls per review (0 = provider default) |
 | `PRISM_RATE_LIMIT_RPM` | `rateLimitRpm` — requests per minute cap (0 = provider default) |
+| `PRISM_BASELINE_FILE` | `baselineFile` — baseline path, relative to the repo root (`none` turns it off) |
 | `ANTHROPIC_API_KEY` | Anthropic provider |
 | `OPENAI_API_KEY` | OpenAI provider |
 | `GEMINI_API_KEY` | Gemini provider |
+
+## Accepting Findings
+
+Findings that have been reviewed and accepted can be left out of every later review, so an agent never re-fixes or re-asks about them. A suppressed finding doesn't count toward `--fail-on`. It is still listed under "Suppressed" in text and markdown output, under `suppressed` in JSON, and as a suppressed result in SARIF, so nothing is hidden.
+
+**Baseline file.** `.prism-baseline.json` at the repository root is meant to be committed, like `.golangci.yml`. Every agent session and CI run on the repo then respects it:
+
+```bash
+prism review staged                     # each finding shows its ID
+prism baseline add 3f9c0e1a2b4d5e6f --reason "test fixture, not a real key"
+prism baseline show
+prism baseline remove 3f9c0e1a2b4d5e6f
+```
+
+`add` looks each ID up in the repository's last review and records its path, category and title; `--force` adds an ID that isn't there. Findings match by ID, the fingerprint of the code they're about. An ID covers one quoted piece of code, in one declaration, in one category, so accepting a finding also accepts any other finding of that category on the same code. A baseline file that can't be parsed fails the review rather than being ignored.
+
+**Inline comments.** For a finding tied to one line, add a `prism:ignore` comment. It works in any comment syntax:
+
+```go
+secret := loadFromVault() // prism:ignore security "loaded from vault, not hardcoded"
+
+// prism:ignore
+legacyHash := md5.Sum(data)
+```
+
+The comment must start with `prism:ignore`, right after a comment opener of the file's language (`//` for Go, `#` for Python, `--` for SQL, and so on). Prism lexes the code, so the token inside a string literal, or later in a comment, is not a directive. After the token come, optionally, the categories it applies to (comma-separated; all categories when none are given) and a quoted reason. Anything else makes it no directive, so a misspelled category never widens to every category. The directive covers findings on its own line. A comment alone on its line (nothing before it, nothing after it closes) also covers the line below.
+
+In a language with multi-line strings or block comments (most of them), a hunk below the top of a file might begin inside a string or comment. Prism then lexes the whole file instead: the working tree, the index or the reviewed revision, whichever the review mode used. Where that file can't be read or doesn't match the diff (a GitHub PR review, for example), directives in such hunks are not honored. The finding is reported, and the baseline still works.
+
+Finding directives is best-effort. The lexer knows each language's comments and common string forms, but not every one. Rust raw and multi-line strings, YAML block scalars, and heredocs (shell, Ruby, Perl, PHP) aren't modeled, so text shaped like a directive inside them is taken as one. Anyone who can write such a string can also add a real comment, so this isn't a new way to suppress a finding, only a rare accident. When suppression has to be exact, use the baseline.
 
 ## Rules Packs
 
