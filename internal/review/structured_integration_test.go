@@ -59,7 +59,22 @@ func TestStructuredOutputLive(t *testing.T) {
 			if err != nil {
 				t.Fatalf("parse: %v\n%s", err, resp.Content)
 			}
-			t.Logf("%s/%s: %d finding(s), %d tokens", tc.provider, tc.model, len(findings), resp.TokensUsed)
+			withFix := 0
+			for _, f := range findings {
+				if f.Fix != nil {
+					withFix++
+				}
+			}
+			applicable := 0
+			postImage := "package run\n\nimport \"os/exec\"\n\nfunc Run(name string) { _ = exec.Command(\"sh\", \"-c\", \"echo \"+name).Run() }\n"
+			files := func(string) (string, bool) { return postImage, true }
+			for _, f := range verifyFixes(findings, diff, files) {
+				if f.Fix != nil {
+					applicable++
+				}
+			}
+			t.Logf("%s/%s: %d finding(s), %d with a fix, %d applicable as exact replacements, %d tokens",
+				tc.provider, tc.model, len(findings), withFix, applicable, resp.TokensUsed)
 			for _, f := range findings {
 				if f.Severity != SeverityLow && f.Severity != SeverityMedium && f.Severity != SeverityHigh {
 					t.Errorf("severity %q outside the schema's enum", f.Severity)

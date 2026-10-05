@@ -412,6 +412,7 @@ Each finding includes:
 - **Confidence**: 0.0 to 1.0 estimate
 - **Locations**: file path, line range, and optional code snippet
 - **Suggestion**: actionable fix, often with code
+- **Fix** (optional): `{"before", "after"}`, a replacement an agent can apply as an exact string edit. `before` is checked to occur exactly once in the whole file (whitespace included, against the real code). A fix that doesn't, or that can't be checked because the file isn't available (a GitHub PR review), is removed and the finding is tagged `fix-dropped`.
 - **Stable ID**: SHA-256 fingerprint of path + category + quoted evidence + the declaration (for Go, the `func` or `type` line) it sits in. The same issue keeps its ID when the model rewords the title or the code moves, and the same code in two functions gets two IDs. Also emitted in SARIF as `partialFingerprints`. Findings without evidence fall back to path + title + start line.
 
 ## AI Development Workflows

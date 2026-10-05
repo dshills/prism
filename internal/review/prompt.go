@@ -41,10 +41,13 @@ Each finding must have this exact structure:
   "startLine": 1,
   "endLine": 1,
   "evidence": "the exact line or lines of code that show the problem, copied verbatim from the input",
+  "fix": {"before": "the code to replace, copied exactly from the file", "after": "the code to put in its place"},
   "tags": ["optional", "tags"]
 }
 
 "evidence" is checked against the input: a finding whose quoted code does not appear in the file it names is discarded, so copy the code exactly rather than paraphrasing it.
+
+"fix" is a replacement an agent applies as written: "before" must be copied exactly from the file, whitespace and indentation included, and must occur only once in it, or the fix is dropped (the finding is kept). Include enough surrounding code to make "before" unique. When the fix is not a direct replacement of code shown in the input, set "before" and "after" to "".
 
 If there are no issues, respond with an empty array: []`
 
@@ -119,10 +122,13 @@ Each finding must have this exact structure:
   "startLine": 1,
   "endLine": 1,
   "evidence": "the exact line or lines of code that show the problem, copied verbatim from the input",
+  "fix": {"before": "the code to replace, copied exactly from the file", "after": "the code to put in its place"},
   "tags": ["optional", "tags"]
 }
 
 "evidence" is checked against the input: a finding whose quoted code does not appear in the file it names is discarded, so copy the code exactly rather than paraphrasing it.
+
+"fix" is a replacement an agent applies as written: "before" must be copied exactly from the file, whitespace and indentation included, and must occur only once in it, or the fix is dropped (the finding is kept). Include enough surrounding code to make "before" unique. When the fix is not a direct replacement of code shown in the input, set "before" and "after" to "".
 
 If there are no issues, respond with an empty array: []`
 

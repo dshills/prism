@@ -40,6 +40,14 @@ func findingSchema() *providers.Schema {
 			{Name: "startLine", Schema: &providers.Schema{Type: "integer"}},
 			{Name: "endLine", Schema: &providers.Schema{Type: "integer"}},
 			{Name: "evidence", Schema: str("The exact line or lines of code that show the problem, copied verbatim from the input")},
+			{Name: "fix", Schema: &providers.Schema{
+				Type:        "object",
+				Description: "A code change that fixes the problem by replacing code shown in the input; both empty when the fix is not such a replacement",
+				Properties: []providers.Property{
+					{Name: "before", Schema: str("The code to replace, copied exactly (whitespace included) from the file; it must occur only once there")},
+					{Name: "after", Schema: str("The code to put in its place")},
+				},
+			}},
 			{Name: "tags", Schema: &providers.Schema{Type: "array", Items: &providers.Schema{Type: "string"}}},
 		},
 	}

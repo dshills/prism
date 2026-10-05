@@ -45,6 +45,12 @@ const (
 	CategoryDocs            Category = "docs"
 )
 
+// Fix replaces Before, copied verbatim from the file, with After.
+type Fix struct {
+	Before string `json:"before"`
+	After  string `json:"after"`
+}
+
 // Location represents where a finding was detected.
 type Location struct {
 	Path    string    `json:"path"`
@@ -75,6 +81,11 @@ type Finding struct {
 	// Evidence is the code the model quoted as showing the problem. It is
 	// checked against the reviewed input (specs/SPEC-review-integrity.md FR-5).
 	Evidence string `json:"evidence,omitempty"`
+	// Fix is a code change an agent can apply as an exact string
+	// replacement: Before occurs exactly once in the file. A fix that does not
+	// is removed during verification (TagFixDropped). nil when the model gave
+	// none.
+	Fix *Fix `json:"fix,omitempty"`
 	// Provider is the LLM vendor that produced this finding
 	// (e.g. "anthropic", "openai"). Empty only for legacy/test data.
 	Provider string `json:"provider,omitempty"`

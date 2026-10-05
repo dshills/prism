@@ -81,6 +81,17 @@ func (t *TextWriter) Write(w io.Writer, report *review.Report) error {
 					ew.printf("    %s\n", line)
 				}
 			}
+
+			// Fix: shown verbatim, not wrapped, since it is applied as written.
+			if f.Fix != nil {
+				ew.println("  Fix (exact replacement):")
+				for _, line := range strings.Split(f.Fix.Before, "\n") {
+					ew.printf("    - %s\n", line)
+				}
+				for _, line := range strings.Split(f.Fix.After, "\n") {
+					ew.printf("    + %s\n", line)
+				}
+			}
 		}
 	}
 

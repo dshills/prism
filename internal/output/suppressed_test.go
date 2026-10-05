@@ -101,3 +101,25 @@ func TestSARIFWriter_Suppressions(t *testing.T) {
 		}
 	}
 }
+
+// A fix is shown verbatim, as a replacement, in text and markdown.
+func TestWriters_ShowFix(t *testing.T) {
+	r := suppressedReport()
+	r.Findings[0].Fix = &review.Fix{Before: "db.Query(\"SELECT \" + id)", After: "db.Query(\"SELECT ?\", id)"}
+	var text bytes.Buffer
+	if err := (&TextWriter{}).Write(&text, r); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"Fix (exact replacement):", "    - db.Query(\"SELECT \" + id)", "    + db.Query(\"SELECT ?\", id)"} {
+		if !strings.Contains(text.String(), want) {
+			t.Errorf("text lacks %q:\n%s", want, text.String())
+		}
+	}
+	var md bytes.Buffer
+	if err := (&MarkdownWriter{}).Write(&md, r); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(md.String(), "```diff\n-db.Query(\"SELECT \" + id)\n+db.Query(\"SELECT ?\", id)\n```") {
+		t.Errorf("markdown lacks the fix diff:\n%s", md.String())
+	}
+}

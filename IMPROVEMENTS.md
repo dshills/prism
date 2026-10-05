@@ -17,7 +17,7 @@ Prism is run by AI coding agents (Claude Code, Codex), not by people at a termin
 | 4 | Stable finding fingerprints | Accuracy, Workflow | High | **Done** |
 | 5 | Finding baseline / suppression | Workflow | High | **Done** |
 | 6 | Native structured output | Accuracy, Tokens | High | **Done** |
-| 7 | Structured fix format | Workflow | High | Not started |
+| 7 | Structured fix format | Workflow | High | **Done** |
 | 8 | Fallback provider | Workflow | High | Not started |
 | 9 | Delta mode: net-new findings | Workflow | High | Not started |
 | 10 | Skip content not worth reviewing | Tokens, Speed | High | Not started |
@@ -169,7 +169,13 @@ Wrap the array in an object (`{"findings": [...]}`), because some APIs require a
 
 ---
 
-### 7. Structured fix format
+### 7. Structured fix format (DONE)
+
+**Status:** Done.
+- **The field:** findings carry an optional `fix: {before, after}`, requested through the structured-output schema (#6) and the system prompts. The schema requires the field, so "no fix" arrives as empty strings, and a no-op fix is ignored.
+- **The check:** verification keeps a fix only if `before` occurs exactly once in the file. It matches whitespace exactly, against the real (unredacted) code an agent edits. It checks the whole reviewed file (the working tree, the index or the tip revision) and counts overlapping matches. Without that file, it accepts only a diff that shows the whole file (a new file or a codebase section), because being unique in the visible hunks says nothing about the code around them. A failed fix is removed and the finding tagged `fix-dropped`; the finding and its prose suggestion stay.
+- **Output and cache:** text and markdown show the fix as a replacement, JSON carries it, and the cache keeps it.
+- **Verified live:** on a test diff, gpt-6.1-sol, Claude Haiku 4.5 and Gemini 3 Flash each returned fixes, and all of them were applicable as exact replacements.
 
 **Problem:** The `suggestion` field is free-form prose. Sometimes the LLM includes a code fix, sometimes it doesn't. An agent has to read the prose, work out the change, and find where it goes. That's slow and error-prone, and two agents can read the same suggestion differently.
 

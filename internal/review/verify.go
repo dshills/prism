@@ -28,13 +28,18 @@ const (
 	// right, but vet also fails on analyzer warnings or missing dependencies,
 	// so this records what happened rather than asserting the claim.
 	TagVetFailed = "vet-failed"
+	// TagFixDropped: the finding's fix was removed because its "before" text
+	// is not in the file exactly once, so it could not be applied as an exact
+	// replacement. The finding and its suggestion are kept.
+	TagFixDropped = "fix-dropped"
 )
 
 // VerifyFindings checks findings against the reviewed input before they are
 // reported (specs/SPEC-review-integrity.md FR-5, FR-6). Evidence runs first;
-// only its survivors go on to the Go compile check. Every finding removed is
-// returned in discarded with its reason, never dropped silently. With
-// verification turned off, findings pass through unchanged.
+// only its survivors go on to the Go compile check, then their fixes are
+// checked (verifyFixes). Every finding removed is returned in discarded with
+// its reason, never dropped silently. With verification turned off, findings
+// pass through unchanged, fixes included.
 func VerifyFindings(ctx context.Context, findings []Finding, diff gitctx.DiffResult, cfg config.Config) (kept []Finding, discarded []Discard) {
 	if !cfg.ShouldVerifyFindings() {
 		return findings, []Discard{}
@@ -46,8 +51,80 @@ func VerifyFindings(ctx context.Context, findings []Finding, diff gitctx.DiffRes
 	}
 	kept, discarded = verifyEvidence(findings, text)
 	kept, compileDiscarded := verifyCompileClaims(ctx, kept, treeEnvFor(diff))
+	// Fixes are checked against the code itself, not the redacted text: an
+	// agent applies them to the real file.
+	kept = verifyFixes(kept, diff.Diff, reviewedFiles(ctx, diff))
 	return kept, append(discarded, compileDiscarded...)
 }
+
+// verifyFixes keeps each finding's fix only if its Before text occurs exactly
+// once in the finding's file, so an agent can apply it as an exact string
+// replacement. That is checked in the whole file as reviewed, when files can
+// read it. Otherwise only a file the diff shows whole (a new file, or a
+// codebase review's section) can be checked: being unique in the hunks shown
+// says nothing about the code around them. A fix that fails, or cannot be
+// checked, is removed and the finding tagged TagFixDropped.
+func verifyFixes(findings []Finding, diff string, files fileSource) []Finding {
+	var whole map[string]string // files the diff shows whole, by path; built on first use
+	for i, f := range findings {
+		if f.Fix == nil {
+			continue
+		}
+		path := findingPath(f)
+		content, ok := "", false
+		if files != nil {
+			content, ok = files(path)
+		}
+		if !ok {
+			if whole == nil {
+				whole = wholeFilesInDiff(diff)
+			}
+			content, ok = whole[path]
+		}
+		if !ok || !occursOnce(content, f.Fix.Before) {
+			f.Fix = nil
+			f.Tags = addTag(f.Tags, TagFixDropped)
+			findings[i] = f
+		}
+	}
+	return findings
+}
+
+// occursOnce reports whether sub starts at exactly one position in s,
+// counting overlapping matches ("aba" occurs twice in "ababa").
+func occursOnce(s, sub string) bool {
+	i := strings.Index(s, sub)
+	return i >= 0 && !strings.Contains(s[i+1:], sub)
+}
+
+// wholeFilesInDiff is the content of each file the diff shows in full: a
+// section whose old side is /dev/null (a new file, or a codebase review's
+// section) has every line of the file in its hunks.
+func wholeFilesInDiff(diff string) map[string]string {
+	out := map[string]string{}
+	for _, sec := range diffutil.SplitSections(diff) {
+		path := diffutil.PathFromSection(sec)
+		if path == "" || !strings.Contains(sec, "\n--- /dev/null\n") {
+			continue
+		}
+		var b strings.Builder
+		for _, l := range diffutil.PostImageLines(sec) {
+			if !l.Removed {
+				b.WriteString(l.Text)
+				b.WriteByte('\n')
+			}
+		}
+		content := b.String()
+		// A new file has no old side, so git's marker can only be about the
+		// new one: the file does not end in a newline.
+		if strings.Contains(sec, "\n\\ No newline at end of file") {
+			content = strings.TrimSuffix(content, "\n")
+		}
+		out[path] = content
+	}
+	return out
+}
+
 
 // ---------------------------------------------------------------------------
 // FR-5: evidence

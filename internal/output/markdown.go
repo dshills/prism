@@ -81,6 +81,11 @@ func (m *MarkdownWriter) Write(w io.Writer, report *review.Report) error {
 				}
 			}
 
+			if f.Fix != nil {
+				ew.printf("**Fix** (exact replacement):\n\n```diff\n%s\n%s\n```\n\n",
+					prefixLines(f.Fix.Before, "-"), prefixLines(f.Fix.After, "+"))
+			}
+
 			ew.printf("---\n\n")
 		}
 
@@ -197,6 +202,15 @@ func inferLang(path string) string {
 // The errWriter type is shared across the output package since
 // both text.go and markdown.go are in package output.
 // No need to redeclare it here - it's defined in text.go.
+
+// prefixLines puts prefix before every line of s, as a diff does.
+func prefixLines(s, prefix string) string {
+	lines := strings.Split(s, "\n")
+	for i, l := range lines {
+		lines[i] = prefix + l
+	}
+	return strings.Join(lines, "\n")
+}
 
 // writeMarkdownSuppressed lists findings accepted by the baseline or an
 // inline prism:ignore.

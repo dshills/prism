@@ -33,6 +33,7 @@ type rawFinding struct {
 	EndLine    int      `json:"endLine"`
 	Tags       []string `json:"tags"`
 	Evidence   string   `json:"evidence,omitempty"`
+	Fix        *Fix     `json:"fix,omitempty"`
 	Provider   string   `json:"provider,omitempty"`
 	Model      string   `json:"model,omitempty"`
 }
@@ -335,6 +336,7 @@ func parseFindings(content string) ([]Finding, error) {
 			Confidence: r.Confidence,
 			Tags:       r.Tags,
 			Evidence:   r.Evidence,
+			Fix:        usableFix(r.Fix),
 			Provider:   r.Provider,
 			Model:      r.Model,
 			Locations: []Location{
@@ -376,6 +378,16 @@ func decodeRawFindings(content string) ([]rawFinding, error) {
 	return raw, nil
 }
 
+// usableFix is the fix a response gave, or nil when it gave none: the schema
+// requires the field, so "no fix" arrives as empty strings. A fix that
+// changes nothing is no fix either.
+func usableFix(f *Fix) *Fix {
+	if f == nil || strings.TrimSpace(f.Before) == "" || f.Before == f.After {
+		return nil
+	}
+	return &Fix{Before: f.Before, After: f.After}
+}
+
 // stampProvenance sets Provider and Model on every finding that doesn't
 // already have them. Used after parsing fresh LLM responses; cached findings
 // retain whatever the cache wrote.
@@ -404,6 +416,7 @@ func findingsToRaw(findings []Finding) []rawFinding {
 			Confidence: f.Confidence,
 			Tags:       f.Tags,
 			Evidence:   f.Evidence,
+			Fix:        f.Fix,
 			Provider:   f.Provider,
 			Model:      f.Model,
 		}
