@@ -9,7 +9,7 @@ import (
 // codebaseBuilderFor mirrors the builder runCodebaseWithFileCache uses.
 func codebaseBuilderFor(maxPerFile int) PromptBuilder {
 	return func(chunkDiff string, files []string, c config.Config, r *Rules) (string, string) {
-		return CodebaseSystemPrompt(), BuildCodebaseUserPrompt(chunkDiff, files, c.MaxFindings, maxPerFile, c.FailOn, r)
+		return CodebaseSystemPrompt(), BuildCodebaseUserPrompt(chunkDiff, files, c.MaxFindings, maxPerFile, c.FailOn, c.MinSeverity, r)
 	}
 }
 

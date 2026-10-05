@@ -173,7 +173,7 @@ type ChunkOptions struct {
 
 // defaultPromptBuilder uses the standard diff-review prompts.
 func defaultPromptBuilder(chunkDiff string, files []string, cfg config.Config, rules *Rules) (string, string) {
-	return SystemPrompt(), BuildUserPromptWithRules(chunkDiff, files, cfg.MaxFindings, cfg.FailOn, rules)
+	return SystemPrompt(), buildUserPrompt(chunkDiff, files, cfg.MaxFindings, cfg.FailOn, cfg.MinSeverity, rules)
 }
 
 // RunChunked reviews diff chunks in parallel and merges findings.
@@ -214,10 +214,15 @@ type chunkRun struct {
 	// providers.Fallback). Their results are not cached: a later run must not
 	// replay a fallback's review as the configured model's.
 	fallback []bool
-	llmMs    int64
-	calls    int
-	splits   int // parts halved after a cut-off response
-	usage    usageLedger
+	// capped marks the chunks whose answer filled a limit lowered to their
+	// share of maxFindings (chunkFindingLimit). It may have left findings
+	// out, and the share is not in the cache key, so they are not cached
+	// either: a later review asking a chunk for more must not replay it.
+	capped []bool
+	llmMs  int64
+	calls  int
+	splits int // parts halved after a cut-off response
+	usage  usageLedger
 }
 
 // reviewChunks reviews chunks in parallel and returns each chunk's findings
@@ -248,13 +253,22 @@ func reviewChunks(ctx context.Context, chunks []Chunk, todo []int, provider prov
 		rpm = providers.DefaultRPM(provider.Name())
 	}
 	limiter := ratelimit.New(rpm)
-	pr := &partReviewer{provider: provider, cfg: cfg, rules: rules, builder: builder, limiter: limiter}
+	// Each chunk is asked for its share of maxFindings, not all of it. The
+	// fingerprint in the cache key is the full limit's, like the note on the
+	// other parts: the share moves with the number of chunks, and a change
+	// in that must not miss every chunk. A chunk whose answer fills its
+	// share is not cached (chunkRun.capped).
+	partCfg := cfg
+	partCfg.MaxFindings = chunkFindingLimit(cfg.MaxFindings, len(chunks))
+	pr := &partReviewer{provider: provider, cfg: partCfg, rules: rules, builder: builder, limiter: limiter}
 
 	run := chunkRun{
 		findings: make([][]Finding, len(chunks)),
 		errs:     make([]error, len(chunks)),
 		fallback: make([]bool, len(chunks)),
+		capped:   make([]bool, len(chunks)),
 	}
+	lowered := partCfg.MaxFindings < cfg.MaxFindings
 	errs := run.errs
 	var wg sync.WaitGroup
 	sem := make(chan struct{}, concurrency)
@@ -280,11 +294,28 @@ func reviewChunks(ctx context.Context, chunks []Chunk, todo []int, provider prov
 			}
 			run.findings[i] = res.findings
 			run.fallback[i] = res.fallback
+			run.capped[i] = lowered && res.full
 		}(i, chunks[i])
 	}
 
 	wg.Wait()
 	return run
+}
+
+// minChunkFindings is the lowest per-chunk findings limit.
+const minChunkFindings = 10
+
+// chunkFindingLimit is the findings limit each of n chunks is asked for when
+// the review keeps total. Asking every chunk for total would allow n times
+// the output tokens of findings that are cut anyway; each is asked for twice
+// its even share instead, so a chunk holding most of the problems still has
+// room, and never fewer than minChunkFindings (or more than total).
+func chunkFindingLimit(total, n int) int {
+	if total <= 0 || n <= 1 {
+		return total
+	}
+	share := (2*total + n - 1) / n
+	return min(total, max(share, minChunkFindings))
 }
 
 // firstError is the first non-nil error in chunk order, labelled with its

@@ -64,6 +64,7 @@ type ReviewOptions struct {
 	Compare            []string
 	Format             string
 	FailOn             string
+	MinSeverity        string
 	MaxFindings        int
 	MaxFindingsPerFile int
 	ContextLines       int
@@ -216,6 +217,9 @@ func configFromOptions(opts ReviewOptions) config.Config {
 	}
 	if opts.FailOn != "" {
 		cfg.FailOn = opts.FailOn
+	}
+	if opts.MinSeverity != "" {
+		cfg.MinSeverity = opts.MinSeverity
 	}
 	if opts.MaxFindings > 0 {
 		cfg.MaxFindings = opts.MaxFindings

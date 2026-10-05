@@ -19,6 +19,7 @@ import (
 // accepting a finding takes effect on the next run even when it is replayed.
 // An unreadable baseline is an error, not an empty one.
 func FinalizeFindings(ctx context.Context, findings []Finding, diff gitctx.DiffResult, cfg config.Config) ([]Finding, []Discard, []Suppression, error) {
+	findings = dropBelow(findings, cfg.MinSeverity)
 	findings, discarded := VerifyFindings(ctx, findings, diff, cfg)
 
 	baseline, err := LoadBaseline(BaselinePath(cfg, diff.Repo.Root))
@@ -36,6 +37,23 @@ func FinalizeFindings(ctx context.Context, findings []Finding, diff gitctx.DiffR
 		findings = findings[:cfg.MaxFindings]
 	}
 	return findings, discarded, suppressed, nil
+}
+
+// dropBelow leaves out findings below minSeverity. The model is told not to
+// write them, so this only enforces what it was asked; they are not listed
+// anywhere, since setting a floor says they are not wanted.
+func dropBelow(findings []Finding, minSeverity string) []Finding {
+	floor := SeverityRank(Severity(minSeverity))
+	if floor <= SeverityRank(SeverityLow) {
+		return findings
+	}
+	kept := findings[:0:0]
+	for _, f := range findings {
+		if SeverityRank(f.Severity) >= floor {
+			kept = append(kept, f)
+		}
+	}
+	return kept
 }
 
 // reviewedFiles reads a file's whole content as it was reviewed: the working

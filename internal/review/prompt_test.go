@@ -93,7 +93,7 @@ func TestBuildCodebaseUserPrompt(t *testing.T) {
 	diff := "diff --git a/main.go b/main.go\n+++ b/main.go\n+package main\n"
 	files := []string{"main.go"}
 
-	prompt := BuildCodebaseUserPrompt(diff, files, 50, 10, "high", nil)
+	prompt := BuildCodebaseUserPrompt(diff, files, 50, 10, "high", "", nil)
 
 	if !strings.Contains(prompt, "BEGIN SOURCE FILES") {
 		t.Error("Prompt should contain source files markers")
@@ -116,7 +116,7 @@ func TestBuildCodebaseUserPrompt(t *testing.T) {
 }
 
 func TestBuildCodebaseUserPrompt_NoLimits(t *testing.T) {
-	prompt := BuildCodebaseUserPrompt("content", nil, 0, 0, "none", nil)
+	prompt := BuildCodebaseUserPrompt("content", nil, 0, 0, "none", "", nil)
 	if strings.Contains(prompt, "findings total") {
 		t.Error("Prompt should not mention max findings total when 0")
 	}

@@ -35,6 +35,7 @@ var (
 	flagFormat            string
 	flagOut               string
 	flagFailOn            string
+	flagMinSeverity       string
 	flagMaxFindings       int
 	flagRules             string
 	flagBaseline          string
@@ -59,6 +60,7 @@ func addReviewFlags(cmd *cobra.Command) {
 	cmd.Flags().StringVar(&flagFormat, "format", "", "Output format (text, json, markdown, sarif)")
 	cmd.Flags().StringVar(&flagOut, "out", "", "Output file path (default: stdout)")
 	cmd.Flags().StringVar(&flagFailOn, "fail-on", "", "Fail on severity threshold (none, low, medium, high)")
+	cmd.Flags().StringVar(&flagMinSeverity, "min-severity", "", "Lowest severity to report (none, low, medium, high); the model is told not to write anything below it")
 	cmd.Flags().IntVar(&flagMaxFindings, "max-findings", 0, "Maximum number of findings")
 	cmd.Flags().StringVar(&flagRules, "rules", "", "Rules file path")
 	cmd.Flags().StringVar(&flagFallback, "fallback", "", "provider:model to review with when the primary provider fails (auth, retries exhausted, unreachable)")
@@ -79,6 +81,9 @@ func buildOverrides() map[string]string {
 	}
 	if flagFailOn != "" {
 		m["failOn"] = flagFailOn
+	}
+	if flagMinSeverity != "" {
+		m["minSeverity"] = flagMinSeverity
 	}
 	if flagMaxFindings > 0 {
 		m["maxFindings"] = fmt.Sprintf("%d", flagMaxFindings)
@@ -584,7 +589,7 @@ func runCodebaseReview(ctx context.Context, diff gitctx.DiffResult, cfg config.C
 	if len(compareModels) >= 2 {
 		maxPerFile := flagMaxFindingsPerFile
 		codebaseBuilder := func(chunkDiff string, files []string, c config.Config, r *review.Rules) (string, string) {
-			return review.CodebaseSystemPrompt(), review.BuildCodebaseUserPrompt(chunkDiff, files, c.MaxFindings, maxPerFile, c.FailOn, r)
+			return review.CodebaseSystemPrompt(), review.BuildCodebaseUserPrompt(chunkDiff, files, c.MaxFindings, maxPerFile, c.FailOn, c.MinSeverity, r)
 		}
 		report, err = runCompareMode(ctx, diff, cfg, compareModels, codebaseBuilder)
 	} else {

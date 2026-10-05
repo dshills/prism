@@ -309,7 +309,9 @@ func reviewChunksCached(ctx context.Context, chunks []Chunk, cfg config.Config, 
 	haveResults := cov.CachedChunks > 0
 	for _, i := range todo {
 		if run.errs[i] == nil {
-			if !run.fallback[i] { // a fallback's review is not cached as this model's
+			// A fallback's review is not cached as this model's, nor one that
+			// may have been cut short by its share of the limit.
+			if !run.fallback[i] && !run.capped[i] {
 				putFindings(rc, keys[i], run.findings[i])
 			}
 			perChunk[i] = run.findings[i]
@@ -533,7 +535,7 @@ func runCodebaseWithFileCache(
 
 	maxPerFile := cfg.MaxFindingsPerFile
 	codebaseBuilder := func(chunkDiff string, files []string, c config.Config, r *Rules) (string, string) {
-		return CodebaseSystemPrompt(), BuildCodebaseUserPrompt(chunkDiff, files, c.MaxFindings, maxPerFile, c.FailOn, r)
+		return CodebaseSystemPrompt(), BuildCodebaseUserPrompt(chunkDiff, files, c.MaxFindings, maxPerFile, c.FailOn, c.MinSeverity, r)
 	}
 	prompt := promptFingerprint(codebaseBuilder, cfg.Config, rules)
 
@@ -578,7 +580,7 @@ func runCodebaseWithFileCache(
 		haveResults := len(uncachedSections) < len(sections) // some files came from cache
 		for i, c := range chunks {
 			if errs[i] == nil {
-				if !run.fallback[i] { // a fallback's review is not cached as this model's
+				if !run.fallback[i] && !run.capped[i] { // see chunkRun
 					storeFindingsPerFile(reviewCache, diffutil.SplitSections(c.Diff), perChunk[i], cfg.Provider, cfg.Model, prompt)
 				}
 				haveResults = true

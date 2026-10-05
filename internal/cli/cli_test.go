@@ -24,6 +24,7 @@ func resetFlags() {
 	flagFormat = ""
 	flagOut = ""
 	flagFailOn = ""
+	flagMinSeverity = ""
 	flagMaxFindings = 0
 	flagRules = ""
 	flagBaseline = ""
@@ -94,6 +95,7 @@ func TestBuildOverrides_AllFlags(t *testing.T) {
 	flagModel = "gpt-4o"
 	flagFormat = "json"
 	flagFailOn = "high"
+	flagMinSeverity = "medium"
 	flagMaxFindings = 10
 	flagContextLines = 5
 	flagMaxDiffBytes = 1000
@@ -107,6 +109,7 @@ func TestBuildOverrides_AllFlags(t *testing.T) {
 		"model":        "gpt-4o",
 		"format":       "json",
 		"failOn":       "high",
+		"minSeverity":  "medium",
 		"maxFindings":  "10",
 		"contextLines": "5",
 		"maxDiffBytes": "1000",

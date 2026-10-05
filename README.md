@@ -190,7 +190,8 @@ All review subcommands accept these flags:
 | `--format` | Output format (`text`, `json`, `markdown`, `sarif`) | `text` |
 | `--out` | Output file path | stdout |
 | `--fail-on` | Fail threshold (`none`, `low`, `medium`, `high`) | `none` |
-| `--max-findings` | Maximum number of findings | `50` |
+| `--min-severity` | Lowest severity to report (`none`, `low`, `medium`, `high`). The model is told not to write anything below it, which saves output tokens, and anything below it is dropped. Agents usually set it to their `--fail-on` | `none` |
+| `--max-findings` | Maximum number of findings. A chunked review asks each chunk for twice its even share (at least 10), not the whole limit | `50` |
 | `--context-lines` | Context lines in diff | `3` |
 | `--max-diff-bytes` | Maximum diff size in bytes | `500000` |
 | `--chunk-bytes` | Target size of each review chunk a larger diff is split into | `24000` |
@@ -257,6 +258,7 @@ Example `config.json`:
   "compare": [],
   "format": "text",
   "failOn": "none",
+  "minSeverity": "none",
   "maxFindings": 50,
   "contextLines": 3,
   "include": ["**/*"],
@@ -290,6 +292,7 @@ Example `config.json`:
 | `PRISM_PROVIDER` | `provider` |
 | `PRISM_MODEL` | `model` |
 | `PRISM_FAIL_ON` | `failOn` |
+| `PRISM_MIN_SEVERITY` | `minSeverity` |
 | `PRISM_FORMAT` | `format` |
 | `PRISM_MAX_FINDINGS` | `maxFindings` |
 | `PRISM_CONTEXT_LINES` | `contextLines` |

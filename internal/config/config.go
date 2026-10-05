@@ -12,11 +12,16 @@ import (
 
 // Config represents the prism configuration.
 type Config struct {
-	Provider     string   `json:"provider"`
-	Model        string   `json:"model"`
-	Compare      []string `json:"compare,omitempty"`
-	Format       string   `json:"format"`
-	FailOn       string   `json:"failOn"`
+	Provider string   `json:"provider"`
+	Model    string   `json:"model"`
+	Compare  []string `json:"compare,omitempty"`
+	Format   string   `json:"format"`
+	FailOn   string   `json:"failOn"`
+	// MinSeverity is the lowest severity reported: the model is told not to
+	// write anything below it, and anything below it is dropped. Empty or
+	// "none" reports every severity. Agents usually set it to FailOn, since
+	// findings below the gate cost output tokens and decide nothing.
+	MinSeverity  string   `json:"minSeverity,omitempty"`
 	MaxFindings  int      `json:"maxFindings"`
 	ContextLines int      `json:"contextLines"`
 	Include      []string `json:"include"`
@@ -176,8 +181,21 @@ func Load(overrides map[string]string) (Config, error) {
 		return Config{}, err
 	}
 	mergeOverrides(&cfg, overrides)
+	if err := checkSeverityLevel("minSeverity", cfg.MinSeverity); err != nil {
+		return Config{}, err
+	}
 
 	return cfg, nil
+}
+
+// checkSeverityLevel rejects a severity level that is not none, low, medium
+// or high (empty is unset).
+func checkSeverityLevel(key, v string) error {
+	switch v {
+	case "", "none", "low", "medium", "high":
+		return nil
+	}
+	return fmt.Errorf("%s must be none, low, medium or high, got %q", key, v)
 }
 
 func mergeFile(dst *Config, src Config) {
@@ -195,6 +213,9 @@ func mergeFile(dst *Config, src Config) {
 	}
 	if src.FailOn != "" {
 		dst.FailOn = src.FailOn
+	}
+	if src.MinSeverity != "" {
+		dst.MinSeverity = src.MinSeverity
 	}
 	if src.MaxFindings > 0 {
 		dst.MaxFindings = src.MaxFindings
@@ -277,6 +298,9 @@ func mergeEnv(cfg *Config) error {
 	if v := os.Getenv("PRISM_FORMAT"); v != "" {
 		cfg.Format = v
 	}
+	if v := os.Getenv("PRISM_MIN_SEVERITY"); v != "" {
+		cfg.MinSeverity = v
+	}
 	if v := os.Getenv("PRISM_MAX_FINDINGS"); v != "" {
 		n, err := strconv.Atoi(v)
 		if err != nil {
@@ -358,6 +382,9 @@ func mergeOverrides(cfg *Config, overrides map[string]string) {
 	if v, ok := overrides["failOn"]; ok && v != "" {
 		cfg.FailOn = v
 	}
+	if v, ok := overrides["minSeverity"]; ok && v != "" {
+		cfg.MinSeverity = v
+	}
 	if v, ok := overrides["maxFindings"]; ok && v != "" {
 		if n, err := strconv.Atoi(v); err == nil {
 			cfg.MaxFindings = n
@@ -418,6 +445,11 @@ func SetField(cfg *Config, key, value string) error {
 		cfg.Format = value
 	case "failOn":
 		cfg.FailOn = value
+	case "minSeverity":
+		if err := checkSeverityLevel("minSeverity", value); err != nil {
+			return err
+		}
+		cfg.MinSeverity = value
 	case "maxFindings":
 		n, err := strconv.Atoi(value)
 		if err != nil {

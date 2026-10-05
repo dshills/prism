@@ -25,7 +25,7 @@ Prism is run by AI coding agents (Claude Code, Codex), not by people at a termin
 | 12 | Token usage reporting | Tokens | Medium | **Done** |
 | 13 | Function context around hunks | Accuracy | Medium | **Done** |
 | 14 | Compare mode on the full pipeline | Accuracy, Speed, Tokens | Medium | **Done** |
-| 15 | Severity floor in the prompt | Tokens, Speed | Medium | Not started |
+| 15 | Severity floor in the prompt | Tokens, Speed | Medium | **Done** |
 | 16 | Low-temperature sampling | Accuracy | Medium | Not started |
 | 17 | Language-specific system prompts | Accuracy | Medium | Not started |
 | 18 | Per-directory / per-language rules | Accuracy | Medium | Not started |
@@ -316,7 +316,17 @@ A deleted file has no post-image lines, so no finding on it can pass evidence ve
 
 ---
 
-### 15. Severity floor in the prompt
+### 15. Severity floor in the prompt (DONE)
+
+**Status:** Done.
+- **Floor:** `minSeverity` is set by config, `PRISM_MIN_SEVERITY`, `--min-severity` or `pkg/prism` `MinSeverity`, and must be `none`, `low`, `medium` or `high`.
+  - Above `low`, the prompt says to report nothing below it, and `FinalizeFindings` drops anything below it after the rules' severity overrides, before verification and the limit. Dropped findings aren't listed anywhere.
+  - The "focus" line for `failOn` is kept only when `failOn` is above the floor.
+  - The floor is part of the prompt fingerprint, so a review cached without it isn't replayed as one that had it.
+- **Per-chunk limit:** each of n chunks is asked for `min(maxFindings, max(ceil(2·maxFindings/n), 10))`, twice its even share. This applies to diff and codebase reviews.
+  - The share isn't in the cache key, just like the other-parts note. A change in the number of chunks still replays the unchanged ones.
+  - A chunk whose answer fills a lowered share may have left findings out, so it isn't cached. A later review that asks it for more reviews it again.
+  - The final `maxFindings` cut is unchanged and still keeps the most severe findings.
 
 **Problem:** The prompt says "Focus especially on findings with severity X or above", so the model still writes low-severity findings. An agent gating on `--fail-on medium` ignores them, but their output tokens are already spent. Output tokens cost the most and make up most of the response time.
 

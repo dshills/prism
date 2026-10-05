@@ -58,6 +58,12 @@ func BuildUserPrompt(diff string, files []string, maxFindings int, failOn string
 
 // BuildUserPromptWithRules constructs the user prompt with optional rules.
 func BuildUserPromptWithRules(diff string, files []string, maxFindings int, failOn string, rules *Rules) string {
+	return buildUserPrompt(diff, files, maxFindings, failOn, "", rules)
+}
+
+// buildUserPrompt is the diff review's user prompt, asking for nothing below
+// minSeverity.
+func buildUserPrompt(diff string, files []string, maxFindings int, failOn, minSeverity string, rules *Rules) string {
 	b := promptPool.Get().(*bytes.Buffer)
 	b.Reset()
 	defer func() {
@@ -71,9 +77,7 @@ func BuildUserPromptWithRules(diff string, files []string, maxFindings int, fail
 	if maxFindings > 0 {
 		fmt.Fprintf(b, "Return at most %d findings.\n", maxFindings)
 	}
-	if failOn != "" && failOn != "none" {
-		fmt.Fprintf(b, "Focus especially on findings with severity %s or above.\n", failOn)
-	}
+	writeSeverityLines(b, failOn, minSeverity)
 
 	// Language hints from file extensions
 	langs := detectLanguages(files)
@@ -138,7 +142,7 @@ func CodebaseSystemPrompt() string {
 }
 
 // BuildCodebaseUserPrompt constructs the user prompt for codebase review.
-func BuildCodebaseUserPrompt(diff string, files []string, maxFindings int, maxFindingsPerFile int, failOn string, rules *Rules) string {
+func BuildCodebaseUserPrompt(diff string, files []string, maxFindings int, maxFindingsPerFile int, failOn, minSeverity string, rules *Rules) string {
 	b := promptPool.Get().(*bytes.Buffer)
 	b.Reset()
 	defer func() {
@@ -155,9 +159,7 @@ func BuildCodebaseUserPrompt(diff string, files []string, maxFindings int, maxFi
 	if maxFindingsPerFile > 0 {
 		fmt.Fprintf(b, "Return at most %d findings per file.\n", maxFindingsPerFile)
 	}
-	if failOn != "" && failOn != "none" {
-		fmt.Fprintf(b, "Focus especially on findings with severity %s or above.\n", failOn)
-	}
+	writeSeverityLines(b, failOn, minSeverity)
 
 	langs := detectLanguages(files)
 	if len(langs) > 0 {
@@ -173,6 +175,20 @@ func BuildCodebaseUserPrompt(diff string, files []string, maxFindings int, maxFi
 	b.WriteString("\n--- END SOURCE FILES ---\n")
 
 	return b.String()
+}
+
+// writeSeverityLines tells the model which severities matter: nothing below
+// minSeverity is to be written, since it is dropped after parsing and would
+// only cost output tokens, and findings at failOn, the level the run gates
+// on, deserve the most attention when failOn is above the floor.
+func writeSeverityLines(b *bytes.Buffer, failOn, minSeverity string) {
+	floor := SeverityRank(Severity(minSeverity))
+	if floor > SeverityRank(SeverityLow) {
+		fmt.Fprintf(b, "Report only findings with severity %s or above. Lower-severity findings are discarded, so do not write them.\n", minSeverity)
+	}
+	if failOn != "" && failOn != "none" && SeverityRank(Severity(failOn)) > floor {
+		fmt.Fprintf(b, "Focus especially on findings with severity %s or above.\n", failOn)
+	}
 }
 
 // extLang maps file extension → language name. Keyed by exact extension so

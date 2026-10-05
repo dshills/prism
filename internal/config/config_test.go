@@ -574,3 +574,43 @@ func TestVerifyFindings(t *testing.T) {
 		t.Error("an unset file value must not turn verification off")
 	}
 }
+
+// minSeverity: config file, environment, CLI-style override and config key,
+// each rejected when it is not a severity level.
+func TestMinSeverity(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("PRISM_MIN_SEVERITY", "")
+
+	cfg, err := Load(nil)
+	if err != nil || cfg.MinSeverity != "" {
+		t.Fatalf("default: MinSeverity = %q, %v; want unset", cfg.MinSeverity, err)
+	}
+	if err := Save(Config{Provider: "openai", MinSeverity: "low"}); err != nil {
+		t.Fatal(err)
+	}
+	if cfg, _ = Load(nil); cfg.MinSeverity != "low" {
+		t.Errorf("config file: MinSeverity = %q, want low", cfg.MinSeverity)
+	}
+	t.Setenv("PRISM_MIN_SEVERITY", "medium")
+	if cfg, _ = Load(nil); cfg.MinSeverity != "medium" {
+		t.Errorf("environment: MinSeverity = %q, want medium", cfg.MinSeverity)
+	}
+	if cfg, _ = Load(map[string]string{"minSeverity": "high"}); cfg.MinSeverity != "high" {
+		t.Errorf("override: MinSeverity = %q, want high", cfg.MinSeverity)
+	}
+	if _, err := Load(map[string]string{"minSeverity": "critical"}); err == nil {
+		t.Error("override critical: no error")
+	}
+	t.Setenv("PRISM_MIN_SEVERITY", "Medium")
+	if _, err := Load(nil); err == nil {
+		t.Error("environment Medium: no error")
+	}
+
+	var c Config
+	if err := SetField(&c, "minSeverity", "high"); err != nil || c.MinSeverity != "high" {
+		t.Errorf("SetField high: %q, %v", c.MinSeverity, err)
+	}
+	if err := SetField(&c, "minSeverity", "urgent"); err == nil || c.MinSeverity != "high" {
+		t.Errorf("SetField urgent: %q, %v; want an error and no change", c.MinSeverity, err)
+	}
+}

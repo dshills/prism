@@ -33,6 +33,7 @@ type part struct {
 type partResult struct {
 	findings []Finding
 	fallback bool  // a fallback provider answered (any of its requests)
+	full     bool  // an answer held as many findings as it was asked for at most
 	calls    int   // model calls, repairs and halves included
 	llmMs    int64 // time spent waiting on the model
 	splits   int   // times a part was halved after a cut-off response
@@ -43,6 +44,7 @@ func (r *partResult) add(o partResult) {
 	r.usage.merge(o.usage)
 	r.findings = append(r.findings, o.findings...)
 	r.fallback = r.fallback || o.fallback
+	r.full = r.full || o.full
 	r.calls += o.calls
 	r.llmMs += o.llmMs
 	r.splits += o.splits
@@ -144,6 +146,7 @@ func (r *partReviewer) ask(ctx context.Context, p part, maxTokens int) (partResu
 	}
 	res.findings = stampProvenance(findings, resp.Provider, resp.Model)
 	res.fallback = resp.Fallback
+	res.full = r.cfg.MaxFindings > 0 && len(findings) >= r.cfg.MaxFindings
 	return res, nil
 }
 
