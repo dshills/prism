@@ -443,6 +443,14 @@ Cut-off responses and repair calls count too. A run replayed entirely from cache
 
 Every request has an output limit of 8192 tokens, and on reasoning models hidden reasoning counts toward it too. Prism checks why each response stopped: Anthropic `stop_reason: max_tokens`, OpenAI and Ollama `finish_reason: length`, Gemini `finishReason: MAX_TOKENS`. A cut-off answer is never parsed. Instead the part is split in half, by file or (for one file) by hunk, and each half is reviewed, up to four levels deep. A part that can't be split is asked once more with twice the limit. If it's still cut off, it's listed under `coverage.skipped` and the review is incomplete (exit 5), rather than reporting a partial list. `coverage.splits` counts the halvings.
 
+A response that isn't valid JSON is repaired locally before prism asks the model to fix it.
+- **What it repairs:** prose before or after the array, a `{"findings": [...]}` wrapper with text around it, trailing commas, and an answer that ends inside its last element.
+- **Lost findings:** an element that's cut off, an object that isn't a finding, or an array that never closes counts as lost findings. A local repair that loses findings still asks the model to fix the response.
+  - If the model's answer does no better, prism keeps the local repair, and the loss is listed under `coverage.skipped` (the review is incomplete).
+  - A repaired answer that lost findings isn't cached.
+- **Second call:** besides losses, prism asks the model again when the result would be ambiguous: no usable finding, or two arrays of findings.
+- **Coverage:** `coverage.salvaged` counts the responses kept from a local repair.
+
 ### Fallback Provider
 
 An agent can't fix a provider outage, so with only one provider an expired key or a rate-limit storm loses the review gate. Set a fallback:

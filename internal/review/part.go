@@ -37,6 +37,7 @@ type partResult struct {
 	calls    int   // model calls, repairs and halves included
 	llmMs    int64 // time spent waiting on the model
 	splits   int   // times a part was halved after a cut-off response
+	salvage  salvage
 	usage    usageLedger
 }
 
@@ -48,6 +49,7 @@ func (r *partResult) add(o partResult) {
 	r.calls += o.calls
 	r.llmMs += o.llmMs
 	r.splits += o.splits
+	r.salvage.add(o.salvage)
 }
 
 // partReviewer reviews parts with one provider, prompt builder and limiter.
@@ -121,11 +123,18 @@ func (r *partReviewer) ask(ctx context.Context, p part, maxTokens int) (partResu
 		return res, err
 	}
 
-	findings, err := parseReviewedFindings(resp.Content, p.diff)
-	if err != nil {
+	// A response that is not valid JSON is first repaired locally
+	// (salvageFindings). One that cannot be, or that lost findings on the
+	// way, costs a second call asking the model to fix it.
+	findings, sv, err := parseReviewedSalvaged(resp.Content, p.diff)
+	if err != nil || sv.lost > 0 {
+		problem := fmt.Sprintf("%d of the findings in it could not be read", sv.lost)
+		if err != nil {
+			problem = "the error was: " + err.Error()
+		}
 		repairPrompt := fmt.Sprintf(
-			"Your previous response was not valid JSON. The error was: %s\n\nPlease fix it and respond with ONLY a valid JSON array of findings.\n\nYour previous response was:\n%s",
-			err.Error(), resp.Content,
+			"Your previous response was not valid JSON; %s\n\nPlease fix it and respond with ONLY a valid JSON array of findings.\n\nYour previous response was:\n%s",
+			problem, resp.Content,
 		)
 		start := time.Now()
 		resp2, err2 := r.provider.Review(ctx, providers.ReviewRequest{
@@ -138,14 +147,27 @@ func (r *partReviewer) ask(ctx context.Context, p part, maxTokens int) (partResu
 		res.llmMs += time.Since(start).Milliseconds()
 		res.calls += providers.CallsOf(resp2)
 		res.usage.add(resp2.Provider, resp2.Model, resp2.Usage)
-		if err2 != nil {
+		if providers.IsTruncated(err2) {
+			// The repair was cut off: review() splits the part or asks for
+			// a larger limit, rather than settle for the local repair.
 			return res, fmt.Errorf("repair: %w", err2)
 		}
-		if findings, err = parseReviewedFindings(resp2.Content, p.diff); err != nil {
-			return res, fmt.Errorf("validation after repair: %w", err)
+		var f2 []Finding
+		var sv2 salvage
+		if err2 == nil {
+			f2, sv2, err2 = parseReviewedSalvaged(resp2.Content, p.diff)
 		}
-		resp = resp2
+		switch {
+		case err2 == nil && (err != nil || sv2.lost <= sv.lost):
+			findings, sv, err, resp = f2, sv2, nil, resp2
+		case err == nil:
+			// The repair did no better: keep the local repair, losses
+			// and all (they make the review incomplete).
+		default:
+			return res, fmt.Errorf("validation after repair: %w", err2)
+		}
 	}
+	res.salvage.add(sv)
 	res.findings = stampProvenance(findings, resp.Provider, resp.Model)
 	res.fallback = resp.Fallback
 	res.full = r.cfg.MaxFindings > 0 && len(findings) >= r.cfg.MaxFindings

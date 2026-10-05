@@ -267,6 +267,7 @@ func reviewWholeCached(ctx context.Context, redactedDiff string, files []string,
 	res, err := pr.review(ctx, part{diff: redactedDiff, files: files}, 0)
 	cov.LLMCalls += res.calls
 	cov.Splits += res.splits
+	res.salvage.record(cov)
 	cov.Tokens = res.usage.list()
 	priceTokens(cov.Tokens, cfg.Prices)
 	if err != nil {
@@ -275,7 +276,9 @@ func reviewWholeCached(ctx context.Context, redactedDiff string, files []string,
 	// A part split after a cut-off response returns its halves' findings.
 	findings := mergeChunkFindings([][]Finding{res.findings})
 
-	if !res.fallback { // a fallback's review is not cached as this model's
+	// A fallback's review is not cached as this model's, nor one a local
+	// repair lost elements of.
+	if !res.fallback && res.salvage.lost == 0 {
 		putFindings(rc, cacheKey, findings)
 	}
 	return findings, res.llmMs, nil
@@ -316,14 +319,15 @@ func reviewChunksCached(ctx context.Context, chunks []Chunk, cfg config.Config, 
 	noteFallback(cov, provider)
 	cov.LLMCalls = run.calls
 	cov.Splits = run.splits
+	run.salvage.record(cov)
 	cov.Tokens = run.usage.list()
 	priceTokens(cov.Tokens, cfg.Prices)
 	haveResults := cov.CachedChunks > 0
 	for _, i := range todo {
 		if run.errs[i] == nil {
 			// A fallback's review is not cached as this model's, nor one that
-			// may have been cut short by its share of the limit.
-			if !run.fallback[i] && !run.capped[i] {
+			// may have left findings out (chunkRun.partial).
+			if !run.fallback[i] && !run.partial[i] {
 				putFindings(rc, keys[i], run.findings[i])
 			}
 			perChunk[i] = run.findings[i]
@@ -372,7 +376,11 @@ func parseFindings(content string) ([]Finding, error) {
 	if err != nil {
 		return nil, err
 	}
+	return rawToFindings(raw), nil
+}
 
+// rawToFindings converts decoded response findings to Findings with IDs.
+func rawToFindings(raw []rawFinding) []Finding {
 	findings := make([]Finding, 0, len(raw))
 	for _, r := range raw {
 		f := Finding{
@@ -400,8 +408,7 @@ func parseFindings(content string) ([]Finding, error) {
 		f.ID = generateFindingID(f)
 		findings = append(findings, f)
 	}
-
-	return findings, nil
+	return findings
 }
 
 // decodeRawFindings reads a response's findings: a JSON array of them, or
@@ -582,6 +589,7 @@ func runCodebaseWithFileCache(
 		run := reviewChunks(ctx, chunks, nil, provider, cfg.Config, rules, codebaseBuilder)
 		noteFallback(&cov, provider)
 		llmMs, cov.LLMCalls, cov.Splits = run.llmMs, run.calls, run.splits
+		run.salvage.record(&cov)
 		cov.Tokens = run.usage.list()
 		priceTokens(cov.Tokens, cfg.Prices)
 		perChunk, errs := run.findings, run.errs
@@ -592,7 +600,7 @@ func runCodebaseWithFileCache(
 		haveResults := len(uncachedSections) < len(sections) // some files came from cache
 		for i, c := range chunks {
 			if errs[i] == nil {
-				if !run.fallback[i] && !run.capped[i] { // see chunkRun
+				if !run.fallback[i] && !run.partial[i] { // see chunkRun
 					storeFindingsPerFile(reviewCache, diffutil.SplitSections(c.Diff), perChunk[i], cfg.Provider, cfg.Model, prompt)
 				}
 				haveResults = true

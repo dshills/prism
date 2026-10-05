@@ -214,15 +214,17 @@ type chunkRun struct {
 	// providers.Fallback). Their results are not cached: a later run must not
 	// replay a fallback's review as the configured model's.
 	fallback []bool
-	// capped marks the chunks whose answer filled a limit lowered to their
-	// share of maxFindings (chunkFindingLimit). It may have left findings
-	// out, and the share is not in the cache key, so they are not cached
-	// either: a later review asking a chunk for more must not replay it.
-	capped []bool
-	llmMs  int64
-	calls  int
-	splits int // parts halved after a cut-off response
-	usage  usageLedger
+	// partial marks the chunks whose answer may have left findings out, so
+	// they are not cached either: one that filled a limit lowered to their
+	// share of maxFindings (chunkFindingLimit; the share is not in the cache
+	// key, and a later review asking for more must not replay it), or one
+	// repaired locally with elements lost (salvageFindings).
+	partial []bool
+	llmMs   int64
+	calls   int
+	splits  int // parts halved after a cut-off response
+	salvage salvage
+	usage   usageLedger
 }
 
 // reviewChunks reviews chunks in parallel and returns each chunk's findings
@@ -257,7 +259,7 @@ func reviewChunks(ctx context.Context, chunks []Chunk, todo []int, provider prov
 	// fingerprint in the cache key is the full limit's, like the note on the
 	// other parts: the share moves with the number of chunks, and a change
 	// in that must not miss every chunk. A chunk whose answer fills its
-	// share is not cached (chunkRun.capped).
+	// share is not cached (chunkRun.partial).
 	partCfg := cfg
 	partCfg.MaxFindings = chunkFindingLimit(cfg.MaxFindings, len(chunks))
 	pr := &partReviewer{provider: provider, cfg: partCfg, rules: rules, builder: builder, limiter: limiter}
@@ -266,7 +268,7 @@ func reviewChunks(ctx context.Context, chunks []Chunk, todo []int, provider prov
 		findings: make([][]Finding, len(chunks)),
 		errs:     make([]error, len(chunks)),
 		fallback: make([]bool, len(chunks)),
-		capped:   make([]bool, len(chunks)),
+		partial:  make([]bool, len(chunks)),
 	}
 	lowered := partCfg.MaxFindings < cfg.MaxFindings
 	errs := run.errs
@@ -286,6 +288,7 @@ func reviewChunks(ctx context.Context, chunks []Chunk, todo []int, provider prov
 			run.llmMs += res.llmMs
 			run.calls += res.calls
 			run.splits += res.splits
+			run.salvage.add(res.salvage)
 			run.usage.merge(res.usage)
 			mu.Unlock()
 			if err != nil {
@@ -294,7 +297,7 @@ func reviewChunks(ctx context.Context, chunks []Chunk, todo []int, provider prov
 			}
 			run.findings[i] = res.findings
 			run.fallback[i] = res.fallback
-			run.capped[i] = lowered && res.full
+			run.partial[i] = lowered && res.full || res.salvage.lost > 0
 		}(i, chunks[i])
 	}
 

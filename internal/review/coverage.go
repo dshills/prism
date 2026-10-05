@@ -41,6 +41,9 @@ type Coverage struct {
 	// Splits counts parts halved and reviewed again because a model's
 	// response was cut off at its output limit.
 	Splits int `json:"splits,omitempty"`
+	// Salvaged counts responses that were not valid JSON and were repaired
+	// locally (salvageFindings). Findings lost in one are a skip.
+	Salvaged int `json:"salvaged,omitempty"`
 	// Excluded lists the files prism's own rules left out (lockfiles,
 	// generated code, deletions, ...), and why. Leaving them out is policy,
 	// so it does not make the review incomplete.
@@ -116,6 +119,7 @@ func (c *Coverage) Add(o Coverage, first bool) {
 	c.LLMCalls += o.LLMCalls
 	c.CachedChunks += o.CachedChunks
 	c.Splits += o.Splits
+	c.Salvaged += o.Salvaged
 	c.WidenedFiles += o.WidenedFiles
 	c.Tokens = mergeTokens(c.Tokens, o.Tokens)
 	c.Excluded = append(c.Excluded, o.Excluded...)

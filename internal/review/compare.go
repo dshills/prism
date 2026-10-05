@@ -135,6 +135,7 @@ func compareCoverage(diff gitctx.DiffResult, reviewers []Reviewer, results []com
 		c.LLMCalls += m.LLMCalls
 		c.CachedChunks += m.CachedChunks
 		c.Splits += m.Splits
+		c.Salvaged += m.Salvaged
 		c.Tokens = mergeTokens(c.Tokens, m.Tokens)
 		allHit = allHit && r.err == nil && m.CacheHit
 		if r.err != nil {

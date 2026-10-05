@@ -30,7 +30,7 @@ Prism is run by AI coding agents (Claude Code, Codex), not by people at a termin
 | 17 | Language-specific system prompts | Accuracy | Medium | **Done** |
 | 18 | Per-directory / per-language rules | Accuracy | Medium | **Done** |
 | 19 | Reasoning effort control | Speed, Tokens | Medium | **Done** |
-| 20 | Local JSON salvage before the repair call | Tokens, Speed | Medium | Not started |
+| 20 | Local JSON salvage before the repair call | Tokens, Speed | Medium | **Done** |
 | 21 | Second-opinion check for blocking findings | Accuracy | Low | Not started |
 | 22 | Concurrent per-commit review | Speed | Low | Not started |
 | 23 | Trim repeated per-chunk prompt overhead | Tokens | Low | Not started |
@@ -406,7 +406,22 @@ The glob matching already exists in `diffutil`. For each chunk, the prompt build
 
 ---
 
-### 20. Local JSON salvage before the repair call
+### 20. Local JSON salvage before the repair call (DONE)
+
+**Status:** Done.
+- **Parsing:** `salvageFindings` (`internal/review/salvage.go`) reads every array in the response that's outside a quoted string. An array nested inside one already read is part of it.
+  - It splits each array into elements, skipping strings whole, and decodes each one on its own after removing trailing commas.
+  - An object that isn't a finding (one with a title, path and severity), an element that's cut off, or an array that never closes was meant as findings, so it counts as a loss. Prose and scalars, such as `[see below]`, are not a loss.
+  - Brackets are matched by type, so a stray `}` ends nothing. A mismatch, or a quote left open at the end, means salvage gives up.
+- **When it repairs:** only when exactly one array holds findings and nothing was lost in any other array.
+- **Losses:** a local repair that lost findings still makes the repair call, because a lost finding may have been the blocking one.
+  - If the model's answer does no better, prism keeps the local repair.
+  - Its losses are a `coverage.skipped` entry, so the review is incomplete (exit 5).
+  - An answer with no findings is never salvaged, because a `[]` somewhere in a broken response is no evidence of a clean review.
+  - Two arrays of findings, a loss in another array, an answer cut off in its first finding, and prose with an unpaired quote all go to the repair call.
+- **Use:** it runs on the first response and on the repair response. Only a response with no array at all makes the repair call.
+- **Coverage:** `salvaged` counts the responses kept from a local repair, summed across per-commit and compare reviews.
+- **Cache:** a repaired answer that lost findings isn't cached (`chunkRun.partial`, which also covers #15's lowered share).
 
 **Problem:** When `parseFindings` fails, prism makes a second full model call. Many failures are mechanical: prose before or after the array, a `{"findings": [...]}` wrapper, trailing commas, or a cut-off final element.
 
