@@ -3,6 +3,9 @@ package review
 import (
 	"context"
 	"fmt"
+	"maps"
+	"path"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -21,16 +24,22 @@ const (
 	// diff split per package gave real ones.
 	DefaultChunkBytes = 24000
 
-	// maxContextFiles caps how many other-part file names a chunk's prompt
-	// lists, so codebase reviews of thousands of files stay bounded.
+	// maxContextFiles caps how many other-part file names, or directories,
+	// a chunk's prompt lists, so codebase reviews of thousands of files stay
+	// bounded.
 	maxContextFiles = 200
+	// maxListedFiles is how many other-part files are named one by one;
+	// beyond it they are counted by directory, since every chunk carries
+	// the list and a long one costs every chunk the same tokens.
+	maxListedFiles = 30
 
 	// chunkerVersion is part of every cache key (reviewCacheKey). What the
 	// prompt builders write is keyed by promptFingerprint, so a change to the
 	// system or user prompt needs no bump; bump it when SplitIntoChunks or
 	// otherPartsNote change, which the fingerprint cannot see. 4: findings
-	// quote their evidence (specs/SPEC-review-integrity.md FR-4).
-	chunkerVersion = 4
+	// quote their evidence (specs/SPEC-review-integrity.md FR-4). 5: a long
+	// list of other parts' files is counted by directory.
+	chunkerVersion = 5
 )
 
 // effectiveChunkBytes returns chunkBytes, or DefaultChunkBytes when unset.
@@ -150,17 +159,45 @@ func otherPartsNote(chunks []Chunk, i int) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "\n\n## Other parts of this review\n\nThis review is split into %d parts and this is part %d. ", len(chunks), i+1)
 	b.WriteString("The files below are in the other parts and are reviewed there. Code you cannot see here may be defined, changed or called in one of them, so do not report something as missing or not updated only because it is absent from this part.\n\n")
-	shown := others
+	if len(others) > maxListedFiles {
+		writeDirCounts(&b, others)
+		return b.String()
+	}
+	for _, f := range others {
+		fmt.Fprintf(&b, "- %s\n", f)
+	}
+	return b.String()
+}
+
+// writeDirCounts lists files by directory, with a count each, in path
+// order: "- internal/review/: 14 files".
+func writeDirCounts(b *strings.Builder, files []string) {
+	counts := map[string]int{}
+	for _, f := range files {
+		dir := path.Dir(f)
+		if dir == "." {
+			dir = "(repository root)"
+		} else {
+			dir += "/"
+		}
+		counts[dir]++
+	}
+	dirs := slices.Sorted(maps.Keys(counts))
+	shown := dirs
 	if len(shown) > maxContextFiles {
 		shown = shown[:maxContextFiles]
 	}
-	for _, f := range shown {
-		fmt.Fprintf(&b, "- %s\n", f)
+	for _, d := range shown {
+		n := counts[d]
+		if n == 1 {
+			fmt.Fprintf(b, "- %s: 1 file\n", d)
+		} else {
+			fmt.Fprintf(b, "- %s: %d files\n", d, n)
+		}
 	}
-	if extra := len(others) - len(shown); extra > 0 {
-		fmt.Fprintf(&b, "- ...and %d more\n", extra)
+	if extra := len(dirs) - len(shown); extra > 0 {
+		fmt.Fprintf(b, "- ...and %d more directories\n", extra)
 	}
-	return b.String()
 }
 
 // PromptBuilder constructs system and user prompts for a chunk.
@@ -173,7 +210,7 @@ type ChunkOptions struct {
 
 // defaultPromptBuilder uses the standard diff-review prompts.
 func defaultPromptBuilder(chunkDiff string, files []string, cfg config.Config, rules *Rules) (string, string) {
-	return SystemPromptFor(files), buildUserPrompt(chunkDiff, files, cfg.MaxFindings, cfg.FailOn, cfg.MinSeverity, rules)
+	return SystemPromptWithRules(files, rules), buildUserPrompt(chunkDiff, files, cfg.MaxFindings, cfg.FailOn, cfg.MinSeverity, rules)
 }
 
 // RunChunked reviews diff chunks in parallel and merges findings.

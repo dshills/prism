@@ -33,7 +33,7 @@ Prism is run by AI coding agents (Claude Code, Codex), not by people at a termin
 | 20 | Local JSON salvage before the repair call | Tokens, Speed | Medium | **Done** |
 | 21 | Second-opinion check for blocking findings | Accuracy | Low | **Done** |
 | 22 | Concurrent per-commit review | Speed | Low | **Done** |
-| 23 | Trim repeated per-chunk prompt overhead | Tokens | Low | Not started |
+| 23 | Trim repeated per-chunk prompt overhead | Tokens | Low | **Done** |
 | 24 | Confidence calibration | Accuracy | Low | Not started |
 | 25 | `prism github post-comments` | Workflow | Low | Not started |
 | — | Per-file incremental cache invalidation | Speed, Tokens | — | **Done** (f844f11) |
@@ -465,7 +465,14 @@ The glob matching already exists in `diffutil`. For each chunk, the prompt build
 
 ---
 
-### 23. Trim repeated per-chunk prompt overhead
+### 23. Trim repeated per-chunk prompt overhead (DONE)
+
+**Status:** Done.
+- **Other-parts note:** past 30 files (`maxListedFiles`), it counts files by directory (`- internal/review/: 14 files`), capped at 200 directories. `chunkerVersion` is now 5.
+- **Prompt order:** the system prompt is the base prompt, then the rules pack's top-level rules ("Review policy for this repository"), then the language guidance, all in a fixed order. The user prompt carries only what's the chunk's own: its limits, the rule sets for its paths, and its diff. Everything every chunk shares is now a common prefix.
+- **Prefix caching:**
+  - Anthropic sends a system prompt of about 1,000 tokens or more (`anthropicCacheMinChars`) as a block with `cache_control: ephemeral`, so later chunks read it from cache.
+  - OpenAI and Gemini cache prefixes on their own. Cached input tokens already show in `coverage.tokens`.
 
 **Problem:** Every chunk repeats the system prompt, the rules section and an `otherPartsNote` listing up to 200 file names (`maxContextFiles`). In a large codebase review, each of N chunks carries the same list of about 2,000 tokens.
 

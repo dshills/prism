@@ -59,7 +59,7 @@ func (a *Anthropic) review(ctx context.Context, req ReviewRequest, structured, w
 	body := anthropicRequest{
 		Model:     a.model,
 		MaxTokens: maxTokens,
-		System:    req.SystemPrompt,
+		System:    anthropicSystem(req.SystemPrompt),
 		Messages: []anthropicMessage{
 			{Role: "user", Content: req.UserPrompt},
 		},
@@ -151,11 +151,41 @@ func (a *Anthropic) review(ctx context.Context, req ReviewRequest, structured, w
 }
 
 type anthropicRequest struct {
-	Model        string                 `json:"model"`
-	MaxTokens    int                    `json:"max_tokens"`
-	System       string                 `json:"system,omitempty"`
+	Model     string `json:"model"`
+	MaxTokens int    `json:"max_tokens"`
+	// System is the system prompt: a string, or blocks when it is marked
+	// for prompt caching.
+	System       any                    `json:"system,omitempty"`
 	Messages     []anthropicMessage     `json:"messages"`
 	OutputConfig *anthropicOutputConfig `json:"output_config,omitempty"`
+}
+
+// anthropicCacheMinChars is the system prompt length, about 1,000 tokens,
+// from which it is marked for prompt caching: the chunks of a review share
+// it, so each after the first reads it from cache instead of paying for it
+// again. Below the models' minimum cacheable length a mark does nothing.
+const anthropicCacheMinChars = 4000
+
+type anthropicSystemBlock struct {
+	Type         string                 `json:"type"`
+	Text         string                 `json:"text"`
+	CacheControl *anthropicCacheControl `json:"cache_control,omitempty"`
+}
+
+type anthropicCacheControl struct {
+	Type string `json:"type"`
+}
+
+// anthropicSystem is the request's system prompt, as a block marked for
+// prompt caching when it is long enough to be cached.
+func anthropicSystem(prompt string) any {
+	if prompt == "" {
+		return nil
+	}
+	if len(prompt) < anthropicCacheMinChars {
+		return prompt
+	}
+	return []anthropicSystemBlock{{Type: "text", Text: prompt, CacheControl: &anthropicCacheControl{Type: "ephemeral"}}}
 }
 
 type anthropicOutputConfig struct {

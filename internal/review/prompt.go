@@ -56,7 +56,9 @@ func BuildUserPrompt(diff string, files []string, maxFindings int, failOn string
 	return BuildUserPromptWithRules(diff, files, maxFindings, failOn, nil)
 }
 
-// BuildUserPromptWithRules constructs the user prompt with optional rules.
+// BuildUserPromptWithRules constructs the user prompt with the rule sets
+// that match files; the top-level rules go in the system prompt
+// (SystemPromptWithRules).
 func BuildUserPromptWithRules(diff string, files []string, maxFindings int, failOn string, rules *Rules) string {
 	return buildUserPrompt(diff, files, maxFindings, failOn, "", rules)
 }
@@ -86,7 +88,7 @@ func buildUserPrompt(diff string, files []string, maxFindings int, failOn, minSe
 	}
 
 	// Rules-based instructions
-	if rulesSection := rulesSectionFor(rules, files); rulesSection != "" {
+	if rulesSection := setsSectionFor(rules, files); rulesSection != "" { // top-level rules are in the system prompt
 		b.WriteString(rulesSection)
 	}
 
@@ -166,7 +168,7 @@ func BuildCodebaseUserPrompt(diff string, files []string, maxFindings int, maxFi
 		fmt.Fprintf(b, "Languages: %s\n", strings.Join(langs, ", "))
 	}
 
-	if rulesSection := rulesSectionFor(rules, files); rulesSection != "" {
+	if rulesSection := setsSectionFor(rules, files); rulesSection != "" { // top-level rules are in the system prompt
 		b.WriteString(rulesSection)
 	}
 

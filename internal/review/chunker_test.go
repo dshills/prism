@@ -186,14 +186,29 @@ func TestOtherPartsNote(t *testing.T) {
 		t.Errorf("note lists the part's own file:\n%s", note)
 	}
 
-	// Capped, with a count of the rest.
+	// Past maxListedFiles, counted by directory.
 	many := []Chunk{{Files: []string{"self.go"}}, {}}
-	for i := range maxContextFiles + 7 {
-		many[1].Files = append(many[1].Files, fmt.Sprintf("f%d.go", i))
+	for i := range maxListedFiles + 5 {
+		many[1].Files = append(many[1].Files, fmt.Sprintf("internal/d%d/f%d.go", i%3, i), fmt.Sprintf("top%d.go", i))
 	}
 	note = otherPartsNote(many, 0)
-	if strings.Count(note, "\n- f") != maxContextFiles || !strings.Contains(note, "...and 7 more") {
-		t.Errorf("cap not applied: %d listed", strings.Count(note, "\n- f"))
+	for _, want := range []string{"- (repository root): 35 files\n", "- internal/d0/: 12 files\n", "- internal/d2/: 11 files\n"} {
+		if !strings.Contains(note, want) {
+			t.Errorf("note lacks %q:\n%s", want, note)
+		}
+	}
+	if strings.Contains(note, ".go") {
+		t.Errorf("files named one by one past the threshold:\n%s", note)
+	}
+
+	// Directories capped, with a count of the rest.
+	dirs := []Chunk{{Files: []string{"self.go"}}, {}}
+	for i := range maxContextFiles + 7 {
+		dirs[1].Files = append(dirs[1].Files, fmt.Sprintf("p%04d/f.go", i))
+	}
+	note = otherPartsNote(dirs, 0)
+	if strings.Count(note, "\n- p") != maxContextFiles || !strings.Contains(note, "...and 7 more directories") {
+		t.Errorf("cap not applied: %d listed", strings.Count(note, "\n- p"))
 	}
 }
 

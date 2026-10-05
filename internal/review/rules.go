@@ -109,6 +109,17 @@ func rulesSectionFor(rules *Rules, files []string) string {
 	}
 	var b strings.Builder
 	writeRules(&b, rules)
+	b.WriteString(setsSectionFor(rules, files))
+	return b.String()
+}
+
+// setsSectionFor is the rule sets that match files, without the top-level
+// rules, which the system prompt carries (SystemPromptWithRules).
+func setsSectionFor(rules *Rules, files []string) string {
+	if rules == nil {
+		return ""
+	}
+	var b strings.Builder
 	scoped := false // the last heading limited the rules to some files
 	for _, set := range rules.Sets {
 		var matched []string

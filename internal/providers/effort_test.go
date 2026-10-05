@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"slices"
+	"strings"
 	"testing"
 )
 
@@ -227,5 +228,31 @@ func TestEffort_RefusalIsPerLevel(t *testing.T) {
 	}
 	if !slices.Equal(sent, []string{"minimal", "", "", "low"}) {
 		t.Errorf("efforts sent = %q, want minimal, then none, then low", sent)
+	}
+}
+
+// A long system prompt is sent as a block marked for prompt caching; a
+// short one as a plain string.
+func TestAnthropic_SystemPromptCaching(t *testing.T) {
+	rs := &recordingServer{}
+	srv := rs.start(t, func(_ map[string]any, w http.ResponseWriter) { _, _ = io.WriteString(w, answers["anthropic"]) })
+	p := newTestProvider("anthropic", srv)
+	long := strings.Repeat("review rule. ", anthropicCacheMinChars/10)
+	for _, sys := range []string{"short", long} {
+		if _, err := p.Review(context.Background(), ReviewRequest{SystemPrompt: sys, UserPrompt: "x"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	reqs := rs.requests()
+	if reqs[0]["system"] != "short" {
+		t.Errorf("short system = %v", reqs[0]["system"])
+	}
+	blocks, _ := reqs[1]["system"].([]any)
+	if len(blocks) != 1 {
+		t.Fatalf("long system = %v", reqs[1]["system"])
+	}
+	b := blocks[0].(map[string]any)
+	if b["text"] != long || b["cache_control"].(map[string]any)["type"] != "ephemeral" {
+		t.Errorf("block = %v", b)
 	}
 }

@@ -159,3 +159,23 @@ func TestMatchGlob_ManyGlobstars(t *testing.T) {
 		t.Fatal("matchGlob backtracked for over 2s")
 	}
 }
+
+// The top-level rules are in the system prompt, shared by every chunk; the
+// user prompt has only the sets for the chunk's own paths.
+func TestRules_SystemPromptAndUserPrompt(t *testing.T) {
+	r := &Rules{
+		Focus: []string{"security"},
+		Sets:  []Rules{{Paths: Globs{"internal/auth/**"}, Required: []RequiredCheck{{ID: "A1", Text: "tokens are compared in constant time"}}}},
+	}
+	cfg := config.Default()
+	sys, user := defaultPromptBuilder("diff", []string{"internal/auth/token.go", "main.go"}, cfg, r)
+	if !strings.Contains(sys, "Review policy for this repository:\n\nFocus areas: security") || strings.Contains(user, "Focus areas") {
+		t.Errorf("top-level rules not in the system prompt only:\nsys: %s\nuser: %s", sys[len(SystemPrompt()):], user)
+	}
+	if !strings.Contains(user, "[A1] tokens are compared") || strings.Contains(sys, "[A1]") {
+		t.Errorf("scoped set not in the user prompt only")
+	}
+	if !strings.HasPrefix(sys, SystemPrompt()) || strings.Index(sys, "Review policy") > strings.Index(sys, "\nGo:\n") {
+		t.Error("system prompt order: base, rules, then language guidance")
+	}
+}

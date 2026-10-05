@@ -562,7 +562,7 @@ func runCodebaseWithFileCache(
 
 	maxPerFile := cfg.MaxFindingsPerFile
 	codebaseBuilder := func(chunkDiff string, files []string, c config.Config, r *Rules) (string, string) {
-		return CodebaseSystemPromptFor(files), BuildCodebaseUserPrompt(chunkDiff, files, c.MaxFindings, maxPerFile, c.FailOn, c.MinSeverity, r)
+		return CodebaseSystemPromptWithRules(files, r), BuildCodebaseUserPrompt(chunkDiff, files, c.MaxFindings, maxPerFile, c.FailOn, c.MinSeverity, r)
 	}
 	prompt := promptFingerprint(codebaseBuilder, cfg.Config, rules)
 

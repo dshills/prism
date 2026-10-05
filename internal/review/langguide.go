@@ -111,3 +111,27 @@ func SystemPromptFor(files []string) string {
 func CodebaseSystemPromptFor(files []string) string {
 	return codebaseSystemPromptText + languageGuidance(files)
 }
+
+// SystemPromptWithRules is the diff review's system prompt with the rules
+// pack's top-level rules in it. Everything every chunk shares comes first,
+// in a fixed order (base prompt, rules, language guidance), and what is the
+// chunk's own (its diff, the rule sets for its paths) comes in the user
+// prompt after it, so a provider's prefix cache can serve the shared part.
+func SystemPromptWithRules(files []string, rules *Rules) string {
+	return systemPrompt + rulesPolicy(rules) + languageGuidance(files)
+}
+
+// CodebaseSystemPromptWithRules is SystemPromptWithRules for a codebase
+// review.
+func CodebaseSystemPromptWithRules(files []string, rules *Rules) string {
+	return codebaseSystemPromptText + rulesPolicy(rules) + languageGuidance(files)
+}
+
+// rulesPolicy is the top-level rules as a system prompt section.
+func rulesPolicy(rules *Rules) string {
+	section := BuildRulesPromptSection(rules)
+	if section == "" {
+		return ""
+	}
+	return "\n\nReview policy for this repository:\n" + section
+}
