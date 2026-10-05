@@ -217,13 +217,10 @@ func finishExit(report *review.Report, failOn string, allowIncomplete bool) int 
 func runCompareMode(ctx context.Context, diff gitctx.DiffResult, cfg config.Config, models []string, builder review.PromptBuilder) (*review.Report, error) {
 	startTime := time.Now()
 
-	rules, err := review.LoadRules(cfg.RulesFile)
-	if err != nil {
-		return nil, fmt.Errorf("loading rules: %w", err)
-	}
-
-	cr, err := review.RunCompareWithOptions(ctx, diff.Diff, diff.Files, models, cfg, rules, review.CompareOptions{
-		Builder: builder,
+	// A custom builder is codebase mode's, whose files are always chunked.
+	cr, err := review.RunCompareWithOptions(ctx, diff, models, cfg, review.CompareOptions{
+		Builder:     builder,
+		AlwaysChunk: builder != nil,
 	})
 	if err != nil {
 		return nil, err
@@ -240,8 +237,7 @@ func runCompareMode(ctx context.Context, diff gitctx.DiffResult, cfg config.Conf
 	// Overwrite provenance to enumerate every compared model, even ones that
 	// produced zero findings — the list represents who reviewed, not who reported.
 	report.Provenance = compareProvenance(models)
-	report.Coverage = review.CompareCoverage(review.ReviewersFromSpecs(models), len(diff.Files), diff.ReviewedBytes(), diff.TruncatedBytes, cr.Calls)
-	report.Coverage.Excluded = append(report.Coverage.Excluded, diff.Excluded...)
+	report.Coverage = cr.Coverage
 
 	// Print compare summary to stderr
 	fmt.Fprintf(os.Stderr, "Compare mode: %d models, %d consensus findings, %d total\n",

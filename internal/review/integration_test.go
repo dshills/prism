@@ -321,7 +321,7 @@ func TestIntegration_RunCompare(t *testing.T) {
 		models[i] = available[i].providerName + ":" + available[i].model
 	}
 
-	result, err := review.RunCompare(ctx, diff.Diff, diff.Files, models, cfg, nil)
+	result, err := review.RunCompare(ctx, diff, models, cfg)
 	if err != nil {
 		t.Fatalf("RunCompare() error: %v", err)
 	}

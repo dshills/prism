@@ -231,16 +231,6 @@ func plural(n int, noun string) string {
 	return fmt.Sprintf("%d %ss", n, noun)
 }
 
-// CompareCoverage is the coverage of a compare-mode review: every model saw the
-// whole diff once.
-func CompareCoverage(reviewers []Reviewer, files, diffBytes, truncatedBytes, calls int) Coverage {
-	c := NewCoverage(reviewers, files, diffBytes, truncatedBytes)
-	c.Chunks = len(reviewers)
-	c.LLMCalls = calls
-	c.Finalize()
-	return c
-}
-
 // ReviewersFromSpecs turns "provider:model" specs into reviewers, skipping
 // malformed specs (those fail earlier, when the provider is created).
 func ReviewersFromSpecs(specs []string) []Reviewer {

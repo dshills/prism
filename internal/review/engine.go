@@ -136,69 +136,18 @@ func fileCacheKey(provider, model, prompt, section string) string {
 	return reviewCacheKey(provider, model, prompt, section)
 }
 
-// reviewPipeline is the shared review flow: redact → cache → rules → LLM → cache write → overrides → limit → report.
+// reviewPipeline is the shared review flow: collect the findings (redact,
+// chunk, cache, model, severity overrides), then finalize them (verify,
+// suppress, limit) into a report.
 func reviewPipeline(ctx context.Context, diff gitctx.DiffResult, cfg config.Config, opts reviewOpts) (*Report, error) {
 	startTime := time.Now()
-
-	// Redact secrets from diff before sending to provider
-	redactedDiff := diff.Diff
-	if cfg.Privacy.RedactSecrets {
-		redactedDiff = redact.Secrets(redactedDiff)
-	}
-
-	// FR-1: coverage is recorded for every outcome, including an empty diff.
-	cov := NewCoverage(ConfigReviewer(cfg.Provider, cfg.Model), len(diff.Files), diff.ReviewedBytes(), diff.TruncatedBytes)
-	cov.Excluded = diff.Excluded
-	cov.WidenedFiles = diff.WidenedFiles
-
-	if strings.TrimSpace(redactedDiff) == "" {
-		return emptyReport(diff, startTime, cov), nil
-	}
-
-	// Decide the chunking up front so a cache hit can report it too.
-	var chunks []Chunk
-	if opts.alwaysChunk || NeedsChunking(redactedDiff, cfg.ChunkBytes) {
-		chunks = SplitIntoChunks(redactedDiff, cfg.ChunkBytes)
-		cov.Chunks = len(chunks)
-	} else {
-		cov.Chunks = 1
-	}
-
-	// Initialize cache
-	reviewCache, err := cache.New(cfg.Cache.Enabled, cfg.Cache.Dir, cfg.Cache.TTLSeconds)
-	if err != nil {
-		// Cache failure is non-fatal, just disable it
-		reviewCache, _ = cache.New(false, "", 0)
-	}
-
-	// Rules and the prompt builder come before the cache: both shape the
-	// prompt, so both are part of the key.
-	rules, err := LoadRules(cfg.RulesFile)
-	if err != nil {
-		return nil, fmt.Errorf("loading rules: %w", err)
-	}
-	builder := opts.builder
-	if builder == nil {
-		builder = defaultPromptBuilder
-	}
-
-	prompt := promptFingerprint(builder, cfg, rules)
-
-	var findings []Finding
-	var llmMs int64
-	if chunks != nil {
-		// Chunked: one cache entry per chunk, so a re-review after an edit
-		// sends only the chunks that changed.
-		findings, llmMs, err = reviewChunksCached(ctx, chunks, cfg, rules, builder, prompt, reviewCache, &cov)
-	} else {
-		findings, llmMs, err = reviewWholeCached(ctx, redactedDiff, diff.Files, cfg, rules, builder, prompt, reviewCache, &cov)
-	}
+	findings, cov, llmMs, empty, err := collectFindings(ctx, diff, cfg, opts)
 	if err != nil {
 		return nil, err
 	}
-
-	// Apply rules severity overrides
-	findings = ApplySeverityOverrides(findings, rules)
+	if empty {
+		return emptyReport(diff, startTime, cov), nil
+	}
 
 	// Verify, suppress and limit after the cache, which holds unverified
 	// findings so a changed tree re-verifies (FR-8).
@@ -213,6 +162,72 @@ func reviewPipeline(ctx context.Context, diff gitctx.DiffResult, cfg config.Conf
 	report.Discarded = discarded
 	report.Suppressed = suppressed
 	return report, nil
+}
+
+// collectFindings is a review of diff with cfg's model, up to its findings:
+// redact, chunk, replay or call the model (with repair, cut-off splitting
+// and partial results), then apply the rules' severity overrides. The
+// findings are not yet verified, suppressed or limited, and the coverage is
+// not yet finalized. empty reports a diff with nothing to review. Compare
+// mode runs it once per model.
+func collectFindings(ctx context.Context, diff gitctx.DiffResult, cfg config.Config, opts reviewOpts) (findings []Finding, cov Coverage, llmMs int64, empty bool, err error) {
+	// Redact secrets from diff before sending to provider
+	redactedDiff := diff.Diff
+	if cfg.Privacy.RedactSecrets {
+		redactedDiff = redact.Secrets(redactedDiff)
+	}
+
+	// FR-1: coverage is recorded for every outcome, including an empty diff.
+	cov = NewCoverage(ConfigReviewer(cfg.Provider, cfg.Model), len(diff.Files), diff.ReviewedBytes(), diff.TruncatedBytes)
+	cov.Excluded = diff.Excluded
+	cov.WidenedFiles = diff.WidenedFiles
+
+	if strings.TrimSpace(redactedDiff) == "" {
+		return nil, cov, 0, true, nil
+	}
+
+	// Decide the chunking up front so a cache hit can report it too.
+	var chunks []Chunk
+	if opts.alwaysChunk || NeedsChunking(redactedDiff, cfg.ChunkBytes) {
+		chunks = SplitIntoChunks(redactedDiff, cfg.ChunkBytes)
+		cov.Chunks = len(chunks)
+	} else {
+		cov.Chunks = 1
+	}
+
+	// Initialize cache
+	reviewCache, cerr := cache.New(cfg.Cache.Enabled, cfg.Cache.Dir, cfg.Cache.TTLSeconds)
+	if cerr != nil {
+		// Cache failure is non-fatal, just disable it
+		reviewCache, _ = cache.New(false, "", 0)
+	}
+
+	// Rules and the prompt builder come before the cache: both shape the
+	// prompt, so both are part of the key.
+	rules, err := LoadRules(cfg.RulesFile)
+	if err != nil {
+		return nil, cov, 0, false, fmt.Errorf("loading rules: %w", err)
+	}
+	builder := opts.builder
+	if builder == nil {
+		builder = defaultPromptBuilder
+	}
+
+	prompt := promptFingerprint(builder, cfg, rules)
+
+	if chunks != nil {
+		// Chunked: one cache entry per chunk, so a re-review after an edit
+		// sends only the chunks that changed.
+		findings, llmMs, err = reviewChunksCached(ctx, chunks, cfg, rules, builder, prompt, reviewCache, &cov)
+	} else {
+		findings, llmMs, err = reviewWholeCached(ctx, redactedDiff, diff.Files, cfg, rules, builder, prompt, reviewCache, &cov)
+	}
+	if err != nil {
+		return nil, cov, llmMs, false, err
+	}
+
+	// Apply rules severity overrides
+	return ApplySeverityOverrides(findings, rules), cov, llmMs, false, nil
 }
 
 // reviewWholeCached reviews a diff that fits in one prompt, with one cache

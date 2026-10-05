@@ -24,7 +24,7 @@ Prism is run by AI coding agents (Claude Code, Codex), not by people at a termin
 | 11 | Detect truncated responses | Accuracy, Tokens | High | **Done** |
 | 12 | Token usage reporting | Tokens | Medium | **Done** |
 | 13 | Function context around hunks | Accuracy | Medium | **Done** |
-| 14 | Compare mode on the full pipeline | Accuracy, Speed, Tokens | Medium | Not started |
+| 14 | Compare mode on the full pipeline | Accuracy, Speed, Tokens | Medium | **Done** |
 | 15 | Severity floor in the prompt | Tokens, Speed | Medium | Not started |
 | 16 | Low-temperature sampling | Accuracy | Medium | Not started |
 | 17 | Language-specific system prompts | Accuracy | Medium | Not started |
@@ -261,7 +261,6 @@ A deleted file has no post-image lines, so no finding on it can pass evidence ve
 - **Recovery:** single-diff and chunked reviews now share one `reviewPart`, which also replaced two copies of the request-and-repair code. A cut-off response is never parsed or repaired. The part is halved instead, by file at the byte midpoint, or by hunk with the file header kept, up to four levels deep. Each half's prompt says what the other half holds.
 - **When it can't split:** an unsplittable part is asked once more at 16384 tokens. If it's still cut off, it's an error: a chunk becomes a coverage skip (exit 5), and a single-diff review fails with the reason.
 - **Reporting:** `coverage.splits` counts the halvings, and the text line says `N parts split after a cut-off response`.
-- **Not covered:** compare mode still uses its own request without this (#14).
 
 **Problem:** Every call uses a fixed `MaxTokens: 8192`, and no provider checks why the response stopped. The stop signals are Anthropic `stop_reason: "max_tokens"`, OpenAI `finish_reason: "length"` and Gemini `finishReason: "MAX_TOKENS"`. When a response hits the limit, the cut-off JSON goes to the repair pass, which only sees the truncated text. The review then either fails or quietly reports a partial list. On reasoning models (GPT-5 and the o-series, Gemini thinking models), hidden reasoning tokens count toward the same limit, so a hard chunk can come back empty.
 
@@ -277,7 +276,6 @@ A deleted file has no post-image lines, so no finding on it can pass evidence ve
 - **Provider usage:** providers return `Usage{input, output, reasoning, cachedInput}`, normalized across APIs. Anthropic's input adds cache reads and writes, Gemini's output adds thinking tokens, and OpenAI's comes from the `*_details` fields. It's recorded even for cut-off responses.
 - **In the report:** usage is summed per model (a fallback can mix models) over every call, including repairs and halves, into `coverage.tokens`. Per-commit reviews merge by model.
 - **Cost:** `costUSD` estimates from built-in Claude prices (Anthropic's rates as of 2026-09-25, dated snapshots priced as their model), a free Ollama, and the `prices` config map for everything else, which also overrides built-ins. Text and markdown print `Tokens: N in (… cached) / N out (… reasoning) — ~$X`, with the cost only when every model is priced.
-- **Not covered:** compare mode doesn't record usage yet (#14).
 
 **Problem:** Every provider fills in `ReviewResponse.TokensUsed`, but prism never reports it. It's also a single input-plus-output sum, which loses the split; output tokens cost several times more than input tokens. Without these numbers, none of the token-reduction items here (#2, #10, #15, #19, #20, #23) can be measured.
 
@@ -304,7 +302,13 @@ A deleted file has no post-image lines, so no finding on it can pass evidence ve
 
 ---
 
-### 14. Compare mode on the full pipeline
+### 14. Compare mode on the full pipeline (DONE)
+
+**Status:** Done.
+- **One pipeline:** `reviewPipeline` is now `collectFindings` (redact, chunk, cache, model, severity overrides) plus `FinalizeFindings`. `RunCompare` runs `collectFindings` once per model, concurrently, with `cfg.Fallback` cleared, then merges with the existing fuzzy matching. Every model therefore gets chunking (codebase compare always chunks), the per-chunk cache, repair, cut-off splitting (#11), its own provider's rate limit and concurrency, partial results (#3) and token usage (#12).
+- **Coverage:** `compareCoverage` combines the models' coverage: chunks, calls, cached chunks, splits and tokens summed, a cache hit only if every model's was, and each model's skips named for it.
+- **Failures:** a failed model is a skip, and the review is incomplete. An auth failure, a malformed spec or a cancelled run fails it, as does every model failing.
+- **Concurrency:** it's capped per provider, not across models. Two specs from the same provider each get that provider's limits.
 
 **Problem:** Agents run compare mode for security-sensitive changes (the project's CLAUDE.md requires it), yet it has the weakest pipeline. `RunCompareWithOptions` sends the whole diff to each model in a single prompt. There's no chunking, even though the chunker exists because an 80 KB diff in one prompt got no findings at all. It also has no cache, no repair pass (one malformed response fails the whole compare), and no rate limit or concurrency cap (every model is called at once).
 

@@ -107,6 +107,8 @@ prism review unstaged --compare anthropic:claude-sonnet-4-6,openai:gpt-5.2
 
 Compare mode reports consensus findings (flagged by 2+ models) and unique findings per model.
 
+Each model runs through the same pipeline as a single-model review, concurrently: chunking, the per-chunk cache, repair, splitting after a cut-off response, its provider's rate limits, and token reporting. Coverage combines them, with chunks, calls and cache use summed and tokens listed per model. A model that fails is left out as a coverage skip (exit 5) while the others' findings stand; an auth failure, a malformed spec, or every model failing fails the run. The `fallback` setting doesn't apply, since each model is named.
+
 ### Output Formats
 
 ```bash

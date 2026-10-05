@@ -316,11 +316,7 @@ func runReview(ctx context.Context, diff gitctx.DiffResult, cfg config.Config, o
 }
 
 func runCompare(ctx context.Context, diff gitctx.DiffResult, cfg config.Config, models []string, maxFindingsPerFile int) (*Report, error) {
-	rules, err := review.LoadRules(cfg.RulesFile)
-	if err != nil {
-		return nil, fmt.Errorf("loading rules: %w", err)
-	}
-	cr, err := review.RunCompare(ctx, diff.Diff, diff.Files, models, cfg, rules)
+	cr, err := review.RunCompareWithOptions(ctx, diff, models, cfg, review.CompareOptions{AlwaysChunk: diff.Mode == string(ModeCodebase)})
 	if err != nil {
 		return nil, err
 	}
@@ -333,8 +329,7 @@ func runCompare(ctx context.Context, diff gitctx.DiffResult, cfg config.Config, 
 	report.Discarded = discarded
 	report.Suppressed = suppressed
 	report.Provenance = compareProvenance(models)
-	report.Coverage = review.CompareCoverage(review.ReviewersFromSpecs(models), len(diff.Files), diff.ReviewedBytes(), diff.TruncatedBytes, cr.Calls)
-	report.Coverage.Excluded = append(report.Coverage.Excluded, diff.Excluded...)
+	report.Coverage = cr.Coverage
 	return report, nil
 }
 
