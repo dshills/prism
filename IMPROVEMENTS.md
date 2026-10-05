@@ -31,7 +31,7 @@ Prism is run by AI coding agents (Claude Code, Codex), not by people at a termin
 | 18 | Per-directory / per-language rules | Accuracy | Medium | **Done** |
 | 19 | Reasoning effort control | Speed, Tokens | Medium | **Done** |
 | 20 | Local JSON salvage before the repair call | Tokens, Speed | Medium | **Done** |
-| 21 | Second-opinion check for blocking findings | Accuracy | Low | Not started |
+| 21 | Second-opinion check for blocking findings | Accuracy | Low | **Done** |
 | 22 | Concurrent per-commit review | Speed | Low | Not started |
 | 23 | Trim repeated per-chunk prompt overhead | Tokens | Low | Not started |
 | 24 | Confidence calibration | Accuracy | Low | Not started |
@@ -431,7 +431,18 @@ The glob matching already exists in `diffutil`. For each chunk, the prompt build
 
 ## 🟨 Low Impact
 
-### 21. Second-opinion check for blocking findings
+### 21. Second-opinion check for blocking findings (DONE)
+
+**Status:** Done.
+- **Setting:** `confirmBlocking` is a `provider:model`, set by config, `PRISM_CONFIRM_BLOCKING`, `--confirm-blocking` or `pkg/prism` `ConfirmBlocking`, and validated as such.
+- **Placement:** `FinalizeFindings` runs it last, after verification, inline ignores and the baseline, and before `maxFindings`. Every review path (diff, codebase, compare, per-commit) gets it.
+- **The check:** each finding at or above `failOn` gets one call. It carries the redacted finding and up to 12 KB of its file's redacted diff, and asks for `{"verdict": "confirm"|"refute", "reason"}` (structured output where supported).
+  - **Locating the code:** in a larger file the excerpt is centred on the finding's line, found through the hunk headers, or on its evidence when that occurs only once. A finding whose code can't be located isn't checked and stays.
+  - The checker is told to confirm when the code shown isn't enough to tell.
+  - Refuted findings go to `discarded` with the checker's reason. A check that fails or can't be parsed keeps its finding.
+- **Cost:** up to 20 checks a review (the most severe first), 4 at a time.
+  - Verdicts are cached by the checker, the effort and the full prompt, so a fix-loop re-review doesn't pay again.
+  - Calls and tokens go into coverage, and `coverage.confirm` reports how many were checked, refuted, failed and left unchecked.
 
 **Problem:** The evidence check and `go vet` catch made-up quotes and false compile claims. They can't catch a wrong argument, such as "this can be nil" when it can't. The findings that hurt most are the ones at or above `failOn`, because they block the agent and start a fix cycle.
 

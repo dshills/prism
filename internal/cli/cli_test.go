@@ -26,6 +26,7 @@ func resetFlags() {
 	flagFailOn = ""
 	flagMinSeverity = ""
 	flagReasoningEffort = ""
+	flagConfirmBlocking = ""
 	flagMaxFindings = 0
 	flagRules = ""
 	flagBaseline = ""

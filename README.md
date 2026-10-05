@@ -191,6 +191,7 @@ All review subcommands accept these flags:
 | `--out` | Output file path | stdout |
 | `--fail-on` | Fail threshold (`none`, `low`, `medium`, `high`) | `none` |
 | `--min-severity` | Lowest severity to report (`none`, `low`, `medium`, `high`). The model is told not to write anything below it, which saves output tokens, and anything below it is dropped. Agents usually set it to their `--fail-on` | `none` |
+| `--confirm-blocking` | `provider:model` asked for a second opinion on each finding at or above `--fail-on`. Refuted findings move to `discarded` with the checker's reason, and a failed check keeps its finding. Up to 20 checks a review, verdicts cached; `coverage.confirm` reports them | |
 | `--reasoning-effort` | How hard a reasoning model thinks before it answers (`none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`), sent as Anthropic `output_config.effort`, OpenAI/Ollama `reasoning_effort` or Gemini `thinkingLevel`. A level the model refuses is dropped for that review. Lower effort is faster and uses fewer tokens | model's default |
 | `--max-findings` | Maximum number of findings. A chunked review asks each chunk for twice its even share (at least 10), not the whole limit | `50` |
 | `--context-lines` | Context lines in diff | `3` |
@@ -261,6 +262,7 @@ Example `config.json`:
   "failOn": "none",
   "minSeverity": "none",
   "reasoningEffort": "",
+  "confirmBlocking": "",
   "maxFindings": 50,
   "contextLines": 3,
   "include": ["**/*"],
@@ -296,6 +298,7 @@ Example `config.json`:
 | `PRISM_FAIL_ON` | `failOn` |
 | `PRISM_MIN_SEVERITY` | `minSeverity` |
 | `PRISM_REASONING_EFFORT` | `reasoningEffort` |
+| `PRISM_CONFIRM_BLOCKING` | `confirmBlocking` |
 | `PRISM_FORMAT` | `format` |
 | `PRISM_MAX_FINDINGS` | `maxFindings` |
 | `PRISM_CONTEXT_LINES` | `contextLines` |

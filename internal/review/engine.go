@@ -163,7 +163,7 @@ func reviewPipeline(ctx context.Context, diff gitctx.DiffResult, cfg config.Conf
 
 	// Verify, suppress and limit after the cache, which holds unverified
 	// findings so a changed tree re-verifies (FR-8).
-	findings, discarded, suppressed, err := FinalizeFindings(ctx, findings, diff, cfg)
+	findings, discarded, suppressed, err := FinalizeFindings(ctx, findings, diff, cfg, &cov)
 	if err != nil {
 		return nil, err
 	}
@@ -629,7 +629,7 @@ func runCodebaseWithFileCache(
 	// Step 13: Verify against the code (FR-5/FR-6; cached findings re-verify
 	// too), suppress accepted findings, and enforce MaxFindings on the merged
 	// set (FR-9).
-	allFindings, discarded, suppressed, err := FinalizeFindings(ctx, allFindings, diff, cfg.Config)
+	allFindings, discarded, suppressed, err := FinalizeFindings(ctx, allFindings, diff, cfg.Config, &cov)
 	if err != nil {
 		return nil, err
 	}

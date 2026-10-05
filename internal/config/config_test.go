@@ -636,3 +636,22 @@ func TestReasoningEffort(t *testing.T) {
 		t.Error("SetField LOW: no error")
 	}
 }
+
+// confirmBlocking must be provider:model wherever it is set.
+func TestConfirmBlocking(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	if cfg, err := Load(map[string]string{"confirmBlocking": "anthropic:claude-haiku-4-5"}); err != nil || cfg.ConfirmBlocking != "anthropic:claude-haiku-4-5" {
+		t.Errorf("override: %q, %v", cfg.ConfirmBlocking, err)
+	}
+	t.Setenv("PRISM_CONFIRM_BLOCKING", "haiku")
+	if _, err := Load(nil); err == nil {
+		t.Error("environment haiku: no error")
+	}
+	var c Config
+	if err := SetField(&c, "confirmBlocking", "openai:"); err == nil {
+		t.Error("SetField openai: no error")
+	}
+	if err := SetField(&c, "confirmBlocking", "openai:gpt-5-mini"); err != nil || c.ConfirmBlocking != "openai:gpt-5-mini" {
+		t.Errorf("SetField: %q, %v", c.ConfirmBlocking, err)
+	}
+}

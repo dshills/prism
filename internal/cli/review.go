@@ -37,6 +37,7 @@ var (
 	flagFailOn            string
 	flagMinSeverity       string
 	flagReasoningEffort   string
+	flagConfirmBlocking   string
 	flagMaxFindings       int
 	flagRules             string
 	flagBaseline          string
@@ -63,6 +64,7 @@ func addReviewFlags(cmd *cobra.Command) {
 	cmd.Flags().StringVar(&flagFailOn, "fail-on", "", "Fail on severity threshold (none, low, medium, high)")
 	cmd.Flags().StringVar(&flagMinSeverity, "min-severity", "", "Lowest severity to report (none, low, medium, high); the model is told not to write anything below it")
 	cmd.Flags().IntVar(&flagMaxFindings, "max-findings", 0, "Maximum number of findings")
+	cmd.Flags().StringVar(&flagConfirmBlocking, "confirm-blocking", "", "provider:model asked for a second opinion on each finding at or above --fail-on; refuted ones are discarded")
 	cmd.Flags().StringVar(&flagReasoningEffort, "reasoning-effort", "", "How hard a reasoning model thinks (none, minimal, low, medium, high, xhigh, max); default: the model's own")
 	cmd.Flags().StringVar(&flagRules, "rules", "", "Rules file path")
 	cmd.Flags().StringVar(&flagFallback, "fallback", "", "provider:model to review with when the primary provider fails (auth, retries exhausted, unreachable)")
@@ -89,6 +91,9 @@ func buildOverrides() map[string]string {
 	}
 	if flagReasoningEffort != "" {
 		m["reasoningEffort"] = flagReasoningEffort
+	}
+	if flagConfirmBlocking != "" {
+		m["confirmBlocking"] = flagConfirmBlocking
 	}
 	if flagMaxFindings > 0 {
 		m["maxFindings"] = fmt.Sprintf("%d", flagMaxFindings)
@@ -236,7 +241,7 @@ func runCompareMode(ctx context.Context, diff gitctx.DiffResult, cfg config.Conf
 		return nil, err
 	}
 
-	findings, discarded, suppressed, err := review.FinalizeFindings(ctx, cr.All, diff, cfg)
+	findings, discarded, suppressed, err := review.FinalizeFindings(ctx, cr.All, diff, cfg, &cr.Coverage)
 	if err != nil {
 		return nil, err
 	}

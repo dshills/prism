@@ -66,6 +66,7 @@ type ReviewOptions struct {
 	FailOn             string
 	MinSeverity        string
 	ReasoningEffort    string
+	ConfirmBlocking    string
 	MaxFindings        int
 	MaxFindingsPerFile int
 	ContextLines       int
@@ -225,6 +226,9 @@ func configFromOptions(opts ReviewOptions) config.Config {
 	if opts.ReasoningEffort != "" {
 		cfg.ReasoningEffort = opts.ReasoningEffort
 	}
+	if opts.ConfirmBlocking != "" {
+		cfg.ConfirmBlocking = opts.ConfirmBlocking
+	}
 	if opts.MaxFindings > 0 {
 		cfg.MaxFindings = opts.MaxFindings
 	}
@@ -328,7 +332,7 @@ func runCompare(ctx context.Context, diff gitctx.DiffResult, cfg config.Config, 
 	if err != nil {
 		return nil, err
 	}
-	findings, discarded, suppressed, err := review.FinalizeFindings(ctx, cr.All, diff, cfg)
+	findings, discarded, suppressed, err := review.FinalizeFindings(ctx, cr.All, diff, cfg, &cr.Coverage)
 	if err != nil {
 		return nil, err
 	}

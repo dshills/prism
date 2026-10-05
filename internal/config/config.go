@@ -27,7 +27,11 @@ type Config struct {
 	// the provider's own setting. Not every model takes every level; one a
 	// model refuses is dropped for that review. Empty leaves each model's
 	// default.
-	ReasoningEffort string   `json:"reasoningEffort,omitempty"`
+	ReasoningEffort string `json:"reasoningEffort,omitempty"`
+	// ConfirmBlocking is a "provider:model" asked for a second opinion on
+	// each finding at or above failOn; the ones it refutes are discarded.
+	// Empty: no check.
+	ConfirmBlocking string   `json:"confirmBlocking,omitempty"`
 	MaxFindings     int      `json:"maxFindings"`
 	ContextLines    int      `json:"contextLines"`
 	Include         []string `json:"include"`
@@ -193,8 +197,23 @@ func Load(overrides map[string]string) (Config, error) {
 	if err := checkEffort(cfg.ReasoningEffort); err != nil {
 		return Config{}, err
 	}
+	if err := checkModelSpec("confirmBlocking", cfg.ConfirmBlocking); err != nil {
+		return Config{}, err
+	}
 
 	return cfg, nil
+}
+
+// checkModelSpec rejects a value that is not "provider:model" (empty is
+// unset).
+func checkModelSpec(key, v string) error {
+	if v == "" {
+		return nil
+	}
+	if p, m, ok := strings.Cut(v, ":"); !ok || p == "" || m == "" {
+		return fmt.Errorf("%s must be provider:model, got %q", key, v)
+	}
+	return nil
 }
 
 // checkEffort rejects a reasoning effort no provider has (empty is unset).
@@ -237,6 +256,9 @@ func mergeFile(dst *Config, src Config) {
 	}
 	if src.ReasoningEffort != "" {
 		dst.ReasoningEffort = src.ReasoningEffort
+	}
+	if src.ConfirmBlocking != "" {
+		dst.ConfirmBlocking = src.ConfirmBlocking
 	}
 	if src.MaxFindings > 0 {
 		dst.MaxFindings = src.MaxFindings
@@ -325,6 +347,9 @@ func mergeEnv(cfg *Config) error {
 	if v := os.Getenv("PRISM_REASONING_EFFORT"); v != "" {
 		cfg.ReasoningEffort = v
 	}
+	if v := os.Getenv("PRISM_CONFIRM_BLOCKING"); v != "" {
+		cfg.ConfirmBlocking = v
+	}
 	if v := os.Getenv("PRISM_MAX_FINDINGS"); v != "" {
 		n, err := strconv.Atoi(v)
 		if err != nil {
@@ -412,6 +437,9 @@ func mergeOverrides(cfg *Config, overrides map[string]string) {
 	if v, ok := overrides["reasoningEffort"]; ok && v != "" {
 		cfg.ReasoningEffort = v
 	}
+	if v, ok := overrides["confirmBlocking"]; ok && v != "" {
+		cfg.ConfirmBlocking = v
+	}
 	if v, ok := overrides["maxFindings"]; ok && v != "" {
 		if n, err := strconv.Atoi(v); err == nil {
 			cfg.MaxFindings = n
@@ -477,6 +505,11 @@ func SetField(cfg *Config, key, value string) error {
 			return err
 		}
 		cfg.MinSeverity = value
+	case "confirmBlocking":
+		if err := checkModelSpec("confirmBlocking", value); err != nil {
+			return err
+		}
+		cfg.ConfirmBlocking = value
 	case "reasoningEffort":
 		if err := checkEffort(value); err != nil {
 			return err

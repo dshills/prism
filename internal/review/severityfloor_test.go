@@ -74,7 +74,7 @@ func TestFinalizeFindings_DropsBelowMinSeverity(t *testing.T) {
 		{ID: "l2", Severity: SeverityLow, Title: "l2"},
 		{ID: "m1", Severity: SeverityMedium, Title: "m1"},
 	}
-	got, _, suppressed, err := FinalizeFindings(context.Background(), findings, gitctx.DiffResult{}, cfg)
+	got, _, suppressed, err := FinalizeFindings(context.Background(), findings, gitctx.DiffResult{}, cfg, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

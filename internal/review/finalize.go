@@ -18,7 +18,11 @@ import (
 // It runs after the cache, which holds findings from before all of this, so
 // accepting a finding takes effect on the next run even when it is replayed.
 // An unreadable baseline is an error, not an empty one.
-func FinalizeFindings(ctx context.Context, findings []Finding, diff gitctx.DiffResult, cfg config.Config) ([]Finding, []Discard, []Suppression, error) {
+//
+// With confirmBlocking set, the findings left that would block the run are
+// then checked by a second model, and the ones it refutes discarded; its
+// calls and tokens are added to cov (which may be nil).
+func FinalizeFindings(ctx context.Context, findings []Finding, diff gitctx.DiffResult, cfg config.Config, cov *Coverage) ([]Finding, []Discard, []Suppression, error) {
 	findings = dropBelow(findings, cfg.MinSeverity)
 	findings, discarded := VerifyFindings(ctx, findings, diff, cfg)
 
@@ -32,6 +36,15 @@ func FinalizeFindings(ctx context.Context, findings []Finding, diff gitctx.DiffR
 	findings, inline := applyIgnores(findings, diff.Diff, reviewedFiles(ctx, diff))
 	findings, accepted := applyBaseline(findings, baseline)
 	suppressed := append(append([]Suppression{}, inline...), accepted...)
+
+	if cov == nil {
+		cov = &Coverage{}
+	}
+	findings, refuted, err := confirmBlocking(ctx, findings, diff, cfg, cov)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	discarded = append(discarded, refuted...)
 
 	if cfg.MaxFindings > 0 && len(findings) > cfg.MaxFindings {
 		findings = findings[:cfg.MaxFindings]

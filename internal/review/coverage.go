@@ -50,10 +50,13 @@ type Coverage struct {
 	Excluded []gitctx.Excluded `json:"excluded"`
 	// Fallback is set when the configured provider failed and a fallback
 	// provider reviewed instead (all or part of the input).
-	Fallback       *FallbackUse `json:"fallback,omitempty"`
-	TruncatedBytes int          `json:"truncatedBytes"`
-	Skipped        []Skip       `json:"skipped"`
-	Complete       bool         `json:"complete"`
+	Fallback *FallbackUse `json:"fallback,omitempty"`
+	// Confirm records the second-opinion check of blocking findings
+	// (confirmBlocking), when one ran.
+	Confirm        *ConfirmUse `json:"confirm,omitempty"`
+	TruncatedBytes int         `json:"truncatedBytes"`
+	Skipped        []Skip      `json:"skipped"`
+	Complete       bool        `json:"complete"`
 }
 
 // FallbackUse records that a fallback provider reviewed, and why.
