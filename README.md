@@ -13,12 +13,17 @@ Prism is **diff-centric** — it reviews only what changed, not your entire repo
 - **4 output formats**: text, JSON, markdown (PR-comment-ready), and SARIF v2.1.0 — all carry AI provenance (provider/model per finding plus a top-level `_provenance` list) so downstream dashboards can distinguish AI findings from deterministic-analyzer output
 - **Multi-model compare mode**: run multiple models in parallel and see consensus vs. unique findings
 - **Secret redaction**: API keys, JWTs, private keys, and database credentials are automatically replaced with `[REDACTED]` before being sent to any provider
-- **Rules packs**: customize severity overrides, focus areas, and required checks
+- **Rules packs**: customize severity overrides, focus areas, and required checks, globally or for parts of the repository (`sets` with `paths` globs)
+- **Language guidance**: the prompt carries review guidance for the languages a chunk covers (Go, Python, JS/TS, Rust, Java, C/C++, Shell, SQL), including each one's common false positives
+- **Accuracy checks**: quoted evidence and Go compile claims are verified, and `--confirm-blocking` asks a second model about each finding that would fail the run
+- **Calibration**: `prism findings confirm|dismiss` records whether findings were real, and later findings carry their category's confirm rate
+- **Suppression and deltas**: a committed baseline and inline `prism:ignore` comments accept findings, and `--since`/`--only-new` compare with an earlier review
+- **Token control**: `--min-severity`, `--reasoning-effort`, token and cost reporting, and lockfiles, generated code and minified assets left out automatically
 - **Deterministic exit codes**: designed for CI pipelines and git hooks
 - **Pre-commit hook**: install/uninstall with `prism hook install`
-- **GitHub PR integration**: post review findings as PR comments
-- **Caching**: file-based cache with SHA-256 keys and configurable TTL
-- **Large diff handling**: diffs over `chunkBytes` (24 KB) are split into chunks of whole files, directories kept together, reviewed with bounded parallel LLM calls; each chunk's prompt lists the files in the other chunks so the model does not report them as missing
+- **GitHub PR integration**: post review findings as PR comments, or post a checked report with `prism github post-comments`
+- **Caching**: file-based cache with SHA-256 keys and configurable TTL, per chunk, so a re-review sends only the chunks that changed
+- **Large diff handling**: diffs over `chunkBytes` (24 KB) are split into chunks of whole files, directories kept together, reviewed with bounded parallel LLM calls. Each chunk's prompt lists the files in the other chunks (counted by directory past 30 files), so the model does not report them as missing. The part shared by every chunk comes first in the prompt, so providers can cache it.
 
 ## Installation
 
@@ -174,6 +179,11 @@ prism review staged --fail-on high
 | `prism baseline add <id>...` | Accept findings so reviews stop reporting them (`--reason`, `--force`) |
 | `prism baseline remove <id>...` | Stop accepting findings |
 | `prism baseline show` | List accepted findings (`--json`) |
+| `prism findings confirm <id>...` | Record findings as real problems (alias `accept`; `--reason`) |
+| `prism findings dismiss <id>...` | Record findings as false positives (`--reason`) |
+| `prism findings stats` | Show confirm rates by category |
+| `prism github <pr>` | Review a pull request and post the findings as a PR review (`--dry-run`) |
+| `prism github post-comments` | Post an existing report as a PR review (`--pr`, `--report`, `--ids`, `--skip-ids`) |
 | `prism hook install` | Install git pre-commit hook |
 | `prism hook uninstall` | Remove git pre-commit hook |
 | `prism version` | Print version |
@@ -206,6 +216,7 @@ All review subcommands accept these flags:
 | `--only-new` | With `--since`, report only new findings; they alone decide the exit code | `false` |
 | `--fallback` | `provider:model` to review with when the primary provider fails (auth, retries exhausted, unreachable) | |
 | `--baseline` | Baseline of accepted findings; `none` reports them all | `.prism-baseline.json` at the repo root |
+| `--allow-incomplete` | Exit 0 even when part of the input wasn't reviewed (otherwise exit 5) | `false` |
 | `--no-redact` | Disable secret redaction (prints warning) | `false` |
 
 **Commit-specific:**
@@ -219,6 +230,7 @@ All review subcommands accept these flags:
 | Flag | Description | Default |
 |------|-------------|---------|
 | `--merge-base` | Use merge base for branch comparisons | `true` |
+| `--per-commit` | Review each commit on its own and combine the findings. Up to 4 commits are reviewed at once, sharing one rate limit, so the provider sees no more traffic than one review | `false` |
 
 **Snippet-specific:**
 
@@ -364,6 +376,12 @@ prism findings stats             # confirm rate by category
 A plain diff shows three lines around each change, not the function it's in. The model can't see the signature, the receiver or the variables in scope, and that's where many false positives ("err is not checked", "x may be nil") and missed bugs come from. Prism widens each hunk to its whole enclosing function (`git diff --function-context`). It does this file by file, keeping a file's plain hunks when widening would grow it more than 3× or 4 KB beyond the plain diff, whichever allows more, so one change inside a very long function can't bloat the review. `coverage.widenedFiles` counts the widened files.
 
 It costs input tokens: on this repository's recent history the diffs grow about 1.4× (unlimited widening would be 1.6×). Turn it off with `functionContext: false` or `--no-function-context`. It applies to `unstaged`, `staged`, `commit` and `range`; snippets and codebase reviews already show whole files.
+
+## Language Guidance
+
+A generic review prompt misses language-specific bugs and flags idioms that aren't bugs. For each chunk, the system prompt adds guidance for the languages of its files: Go, Python, JavaScript/TypeScript, Rust, Java, C/C++, Shell and SQL.
+- **What it covers:** the mistakes reviews tend to miss in that language (Go `defer` in loops, Python mutable defaults, unawaited promises, `unwrap` on input). It also has a "do not report" list of the language's common false positives, such as unchecked writes to a `bytes.Buffer` and style a formatter or linter enforces.
+- **Order:** sections come in a fixed order, so the same languages always give the same prompt, and any change to the guidance is a cache miss.
 
 ## Files Left Out
 
@@ -539,6 +557,7 @@ Set `OLLAMA_HOST` to use a custom Ollama endpoint (default: `http://localhost:11
 | `2` | Usage error or invalid arguments |
 | `3` | Provider authentication or configuration error |
 | `4` | Runtime error (git failure, IO error, schema validation failure) |
+| `5` | Incomplete review: part of the input wasn't reviewed (a truncated diff, a failed chunk or commit, findings lost in a malformed response). `--allow-incomplete` exits 0 instead |
 
 ## Finding Categories
 
