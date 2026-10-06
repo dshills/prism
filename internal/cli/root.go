@@ -4,10 +4,13 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/dshills/prism/pkg/prism"
 	"github.com/spf13/cobra"
 )
 
-const version = "0.5.0"
+// version is the release, kept in one place (pkg/prism.Version) so the CLI
+// and the library cannot disagree.
+const version = prism.Version
 
 // Exit codes per spec section 6.5
 const (
