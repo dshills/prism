@@ -16,7 +16,7 @@ import (
 	"github.com/dshills/prism/internal/review"
 )
 
-const Version = "0.7.1"
+const Version = "0.8.0"
 
 type Report = review.Report
 type Finding = review.Finding
