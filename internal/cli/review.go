@@ -56,7 +56,7 @@ func addReviewFlags(cmd *cobra.Command) {
 	cmd.Flags().BoolVar(&flagNoFunctionContext, "no-function-context", false, "Keep plain hunks instead of widening them to their enclosing functions")
 	cmd.Flags().BoolVar(&flagNoAutoExclude, "no-auto-exclude", false, "Review lockfiles, generated code, minified assets, snapshots and deletions too")
 	cmd.Flags().BoolVar(&flagNoVerifyFindings, "no-verify-findings", false, "Report findings without checking their quoted evidence or Go compile claims against the code")
-	cmd.Flags().StringVar(&flagProvider, "provider", "", "LLM provider (anthropic, openai, gemini)")
+	cmd.Flags().StringVar(&flagProvider, "provider", "", "LLM provider (anthropic, openai, gemini, ollama, wafer)")
 	cmd.Flags().StringVar(&flagModel, "model", "", "Model name")
 	cmd.Flags().StringVar(&flagCompare, "compare", "", "Compare mode: comma-separated provider:model pairs")
 	cmd.Flags().StringVar(&flagFormat, "format", "", "Output format (text, json, markdown, sarif)")

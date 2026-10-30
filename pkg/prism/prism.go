@@ -175,12 +175,13 @@ func KnownModels() []ModelInfo {
 		{Provider: "openai", Models: []string{"gpt-5.3-codex", "gpt-5.3-codex-spark", "gpt-5.2-codex", "gpt-5.2", "gpt-4.1-mini", "o3-mini"}},
 		{Provider: "gemini", Models: []string{"gemini-3-flash-preview", "gemini-3-pro-preview", "gemini-2.5-flash", "gemini-2.5-pro"}},
 		{Provider: "ollama", Models: []string{"llama3.3", "llama3.2", "llama3.1", "codellama", "qwen2.5-coder", "deepseek-coder-v2"}},
+		{Provider: "wafer", Models: []string{"GLM-5.3", "GLM-5.3-Flash", "DeepSeek-V4.1-Flash", "DeepSeek-V4-Pro", "Kimi-K3"}},
 	}
 }
 
 func IsSupportedProvider(provider string) bool {
 	switch strings.ToLower(strings.TrimSpace(provider)) {
-	case "anthropic", "openai", "gemini", "google", "ollama", "lmstudio":
+	case "anthropic", "openai", "gemini", "google", "ollama", "lmstudio", "wafer":
 		return true
 	default:
 		return false
@@ -196,6 +197,10 @@ func ProviderForModel(model string) string {
 		return "openai"
 	case strings.HasPrefix(model, "gemini"):
 		return "gemini"
+	// The generations Wafer serves. Ollama's tags of earlier ones (glm-4.6,
+	// kimi-k2, deepseek-v3, deepseek-coder) stay local.
+	case strings.HasPrefix(model, "glm-5"), strings.HasPrefix(model, "kimi-k3"), strings.HasPrefix(model, "deepseek-v4"):
+		return "wafer"
 	case strings.Contains(model, "llama"), strings.Contains(model, "qwen"), strings.Contains(model, "codellama"), strings.Contains(model, "deepseek"):
 		return "ollama"
 	default:

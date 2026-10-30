@@ -61,6 +61,17 @@ var knownModels = []modelInfo{
 			"deepseek-coder-v2",
 		},
 	},
+	{
+		// Wafer's catalog changes; GET https://pass.wafer.ai/v1/models lists it.
+		Provider: "wafer",
+		Models: []string{
+			"GLM-5.3",
+			"GLM-5.3-Flash",
+			"DeepSeek-V4.1-Flash",
+			"DeepSeek-V4-Pro",
+			"Kimi-K3",
+		},
+	},
 }
 
 var modelsListCmd = &cobra.Command{

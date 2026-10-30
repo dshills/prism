@@ -9,7 +9,7 @@ Prism is **diff-centric** — it reviews only what changed, not your entire repo
 ## Features
 
 - **6 review modes**: unstaged, staged, commit, range, snippet, and full codebase
-- **4 LLM providers**: Anthropic, OpenAI, Google Gemini, and Ollama/LMStudio (local)
+- **5 LLM providers**: Anthropic, OpenAI, Google Gemini, Wafer (hosted open models such as GLM and DeepSeek), and Ollama/LMStudio (local)
 - **4 output formats**: text, JSON, markdown (PR-comment-ready), and SARIF v2.1.0 — all carry AI provenance (provider/model per finding plus a top-level `_provenance` list) so downstream dashboards can distinguish AI findings from deterministic-analyzer output
 - **Multi-model compare mode**: run multiple models in parallel and see consensus vs. unique findings
 - **Secret redaction**: API keys, JWTs, private keys, and database credentials are automatically replaced with `[REDACTED]` before being sent to any provider
@@ -324,6 +324,8 @@ Example `config.json`:
 | `ANTHROPIC_API_KEY` | Anthropic provider |
 | `OPENAI_API_KEY` | OpenAI provider |
 | `GEMINI_API_KEY` | Gemini provider |
+| `WAFER_API_KEY` | Wafer provider |
+| `WAFER_API_URL` | Wafer API base URL (default `https://pass.wafer.ai/v1`) |
 
 ## Accepting Findings
 
@@ -474,10 +476,11 @@ prism review staged --rules rules.json
 | OpenAI | `OPENAI_API_KEY` | gpt-5.3-codex, gpt-5.3-codex-spark, gpt-5.2-codex, gpt-5.2, gpt-4.1-mini, o3-mini |
 | Gemini | `GEMINI_API_KEY` | gemini-3-flash-preview, gemini-3-pro-preview, gemini-2.5-flash, gemini-2.5-pro |
 | Ollama | — | llama3.3, llama3.2, llama3.1, codellama, qwen2.5-coder, deepseek-coder-v2 |
+| Wafer | `WAFER_API_KEY` | GLM-5.3, GLM-5.3-Flash, DeepSeek-V4.1-Flash, DeepSeek-V4-Pro, Kimi-K3, and the rest of Wafer's catalog |
 
 ### Structured Output
 
-Prism asks every provider for its findings in the provider's structured-output mode, constrained to a JSON schema: `response_format` for OpenAI (and OpenAI-compatible servers through the `ollama` provider), `output_config.format` for Anthropic, and `responseSchema` for Gemini. Responses are therefore always valid JSON with valid severities and categories, and the repair call for malformed output is rarely needed. An endpoint that doesn't support it is detected on its first refusal and asked in plain JSON from then on. The live check is `go test -tags integration -run TestStructuredOutputLive ./internal/review`.
+Prism asks every provider for its findings in the provider's structured-output mode, constrained to a JSON schema: `response_format` for OpenAI and Wafer (and OpenAI-compatible servers through the `ollama` provider), `output_config.format` for Anthropic, and `responseSchema` for Gemini. Responses are therefore always valid JSON with valid severities and categories, and the repair call for malformed output is rarely needed. An endpoint that doesn't support it is detected on its first refusal and asked in plain JSON from then on. The live check is `go test -tags integration -run TestStructuredOutputLive ./internal/review`.
 
 ### Token Usage and Cost
 
@@ -540,6 +543,24 @@ prism review unstaged --provider ollama --model llama3
 ```
 
 Set `OLLAMA_HOST` to use a custom Ollama endpoint (default: `http://localhost:11434`).
+
+### Wafer
+
+[Wafer](https://wafer.ai) serves open models such as GLM, DeepSeek, Kimi and Qwen through the OpenAI API:
+
+```bash
+export WAFER_API_KEY="your-key-here"
+prism review staged --provider wafer --model GLM-5.3
+prism review staged --provider wafer --model DeepSeek-V4.1-Flash --reasoning-effort high
+```
+
+- **Models:** use any model id from Wafer's catalog (`curl https://pass.wafer.ai/v1/models` lists it). Ids are matched without regard to case.
+- **Endpoint:** `WAFER_API_URL` overrides the endpoint. It takes the API's base (`https://pass.wafer.ai/v1`) or the full `/chat/completions` URL.
+- **Request settings:** findings come back as structured output (`response_format` with a JSON schema).
+  - `--reasoning-effort` is sent as `reasoning_effort`, which takes `none`, `low`, `medium`, `high`, `xhigh` or `max`.
+  - Each model takes a subset of those levels. Wafer refuses other values (`minimal`, for example), and prism then reviews without an effort.
+- **Cost:** Wafer's prices are per account and its catalog changes, so prism has none built in. To get a cost estimate, set them in `prices` (US dollars per million tokens), for example `"wafer:GLM-5.3": { "input": 0.30, "output": 3.00 }`.
+- **Limits:** Wafer doesn't publish rate limits. Prism's defaults are 60 requests a minute and 8 at once; change them with `rateLimitRpm` and `maxConcurrency`.
 
 ## Privacy & Security
 

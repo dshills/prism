@@ -74,6 +74,7 @@ func TestIsSupportedProvider(t *testing.T) {
 		{"google", true},
 		{"ollama", true},
 		{"lmstudio", true},
+		{"wafer", true},
 		// case-insensitive
 		{"ANTHROPIC", true},
 		{"OpenAI", true},
@@ -127,6 +128,14 @@ func TestProviderForModel(t *testing.T) {
 		{"qwen2.5-coder", "ollama"},
 		{"codellama", "ollama"},
 		{"deepseek-coder-v2", "ollama"},
+		{"deepseek-v2", "ollama"},
+		{"deepseek-v3", "ollama"},
+		{"glm-4.6", ""},
+		{"kimi-k2", ""},
+		// wafer
+		{"GLM-5.3", "wafer"},
+		{"DeepSeek-V4.1-Flash", "wafer"},
+		{"Kimi-K3", "wafer"},
 		// unknown
 		{"unknown-model", ""},
 		{"", ""},

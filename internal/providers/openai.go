@@ -15,8 +15,10 @@ import (
 
 const defaultOpenAIURL = "https://api.openai.com/v1/chat/completions"
 
-// OpenAI implements the Reviewer interface for OpenAI's API.
+// OpenAI implements the Reviewer interface for OpenAI's API, and for other
+// services that speak it under their own name (Wafer).
 type OpenAI struct {
+	name    string // "" is "openai"
 	apiKey  string
 	model   string
 	baseURL string
@@ -43,7 +45,12 @@ func NewOpenAI(model string) (*OpenAI, error) {
 	}, nil
 }
 
-func (o *OpenAI) Name() string { return "openai" }
+func (o *OpenAI) Name() string {
+	if o.name == "" {
+		return "openai"
+	}
+	return o.name
+}
 
 func (o *OpenAI) Review(ctx context.Context, req ReviewRequest) (ReviewResponse, error) {
 	// An endpoint without response_format, or a model that does not reason,

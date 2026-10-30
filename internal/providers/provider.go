@@ -86,6 +86,8 @@ func New(provider, model string) (Reviewer, error) {
 		return NewGemini(model)
 	case "ollama", "lmstudio":
 		return NewOllama(model)
+	case "wafer":
+		return NewWafer(model)
 	default:
 		return nil, fmt.Errorf("unknown provider: %s", provider)
 	}
