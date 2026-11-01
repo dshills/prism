@@ -28,7 +28,7 @@ func NewWafer(model string) (*OpenAI, error) {
 		model:   model,
 		baseURL: waferChatURL(os.Getenv("WAFER_API_URL")),
 		// Reasoning models can think for minutes before answering.
-		client: &http.Client{Timeout: 300 * time.Second},
+		client: &http.Client{Timeout: 900 * time.Second},
 	}, nil
 }
 

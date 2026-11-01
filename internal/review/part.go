@@ -15,7 +15,7 @@ import (
 
 const (
 	// defaultMaxTokens is the output limit of a review request.
-	defaultMaxTokens = 8192
+	defaultMaxTokens = 32768
 	// maxSplitDepth is how many times a part whose response was cut off can
 	// be halved before it is retried with a larger limit instead.
 	maxSplitDepth = 4

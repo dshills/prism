@@ -188,3 +188,22 @@ func TestRun_TruncatedChunkIsSkipped(t *testing.T) {
 		t.Errorf("coverage = %+v, want d2's chunk skipped as cut off", c)
 	}
 }
+
+// Reasoning-heavy responses that outgrow the former 16K retry allowance
+// should fit the initial request instead of repeatedly splitting the input.
+func TestRunReasoningBudgetCompletesWithoutSplitting(t *testing.T) {
+	ts := &truncatingServer{maxFiles: 0, maxHunks: 0, bigLimit: 24000}
+	ts.start(t)
+	diff := threeChunkDiff("reasoning-budget")
+	diff.Diff = fileDiff("a.go", "x")
+	report, err := Run(context.Background(), diff, chunkTestConfig2(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !report.Coverage.Complete || report.Coverage.Splits != 0 || report.Coverage.LLMCalls != 1 {
+		t.Fatalf("expected one complete request without splitting: %+v", report.Coverage)
+	}
+	if got := ts.calls(); len(got) != 1 || got[0] < 24000 {
+		t.Fatalf("reasoning output allowance was not sent to the provider: %v", got)
+	}
+}
