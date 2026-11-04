@@ -288,7 +288,10 @@ func TestWaferEvalCorpus(t *testing.T) {
 					t.Errorf("%s: the diff does not add the anchor line %q", b.ID, b.Anchor)
 				}
 			}
-			if _, err := os.Stat("go.mod"); err == nil && goErr == nil {
+			if _, err := os.Stat("go.mod"); err == nil {
+				if goErr != nil {
+					t.Skip("go not found: the case's Go code is not vetted")
+				}
 				cmd := exec.Command("go", "vet", "./...")
 				cmd.Env = append(os.Environ(), "GOWORK=off", "GOFLAGS=")
 				if out, err := cmd.CombinedOutput(); err != nil {

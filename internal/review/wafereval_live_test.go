@@ -83,11 +83,15 @@ func TestWaferEval(t *testing.T) {
 			continue
 		}
 		levels := m.Efforts
-		if len(efforts) > 0 {
+		switch {
+		case len(m.Efforts) == 0:
+			levels = []string{""} // takes no effort: its default
+		case len(efforts) > 0:
 			levels = slices.DeleteFunc(slices.Clone(levels), func(e string) bool { return !slices.Contains(efforts, e) })
-		}
-		if len(levels) == 0 && len(m.Efforts) == 0 {
-			levels = []string{""}
+			if len(levels) == 0 {
+				t.Errorf("model %s takes efforts %v, none of WAFER_EVAL_EFFORTS %v", m.ID, m.Efforts, efforts)
+				continue
+			}
 		}
 		for _, e := range levels {
 			combos = append(combos, combo{m, e})
