@@ -1,0 +1,131 @@
+[
+  {
+    "id": "retry-body",
+    "description": "Adds retries to an HTTP POST, reusing one request across attempts.",
+    "bugs": [
+      {
+        "id": "retry-body/reused-body",
+        "path": "internal/client/client.go",
+        "anchor": "resp, err := c.http.Do(req)",
+        "summary": "The request and its bytes.Reader body are built once; the first attempt drains the body, so every retry sends an empty body (or fails on the Content-Length mismatch).",
+        "keywords": ["getbody", "rewind", "drain", "consumed", "exhaust", "already been read", "already read", "reuse", "re-use", "reused", "same request", "new request", "newrequest", "recreat", "re-creat", "rebuild", "empty body", "body length", "contentlength", "content-length", "eof"]
+      },
+      {
+        "id": "retry-body/unclosed-5xx",
+        "path": "internal/client/client.go",
+        "anchor": "lastErr = fmt.Errorf(\"post %s: server error %s\", path, resp.Status)",
+        "summary": "A 5xx response is dropped without closing its body, leaking the connection on every retried attempt.",
+        "keywords": ["close", "leak"]
+      }
+    ]
+  },
+  {
+    "id": "token-bucket",
+    "description": "Moves a token bucket from float to integer counts.",
+    "bugs": [
+      {
+        "id": "token-bucket/truncated-refill",
+        "path": "internal/ratelimit/bucket.go",
+        "anchor": "b.tokens += int64(now.Sub(b.last)/time.Second) * b.rate",
+        "tolerance": 5,
+        "summary": "Elapsed time is truncated to whole seconds, yet last is reset on every call, so a bucket called more than once a second never refills.",
+        "keywords": ["truncat", "fraction", "sub-second", "subsecond", "integer division", "rounds down", "round down", "rounded down", "never refill", "refill", "starv", "whole second", "less than a second", "less than one second", "under a second", "discard", "lost", "loses"]
+      }
+    ]
+  },
+  {
+    "id": "transfer-locks",
+    "description": "Replaces a ledger-wide mutex with per-account locks.",
+    "bugs": [
+      {
+        "id": "transfer-locks/lock-order",
+        "path": "internal/ledger/ledger.go",
+        "anchor": "to.mu.Lock()",
+        "tolerance": 6,
+        "summary": "Locks are taken in argument order, so concurrent A->B and B->A transfers deadlock; a transfer to the same account locks one mutex twice.",
+        "keywords": ["deadlock", "lock order", "ordering", "order of lock", "opposite", "self-transfer", "same account", "from == to", "inversion", "abba", "consistent order"]
+      }
+    ]
+  },
+  {
+    "id": "loader-ttl",
+    "description": "Adds expiry to a read-through cache.",
+    "bugs": [
+      {
+        "id": "loader-ttl/shadowed-item",
+        "path": "internal/cache/loader.go",
+        "anchor": "item, err := l.fetch(ctx, key)",
+        "summary": "item is redeclared with := inside the if, so on a miss Get returns nil and on expiry it returns the stale item instead of the fresh one.",
+        "keywords": ["shadow", ":=", "nil", "stale", "expired", "outer", "redeclar", "new variable", "inner", "scope", "old item", "fresh"]
+      }
+    ]
+  },
+  {
+    "id": "prober",
+    "description": "Runs health probes concurrently.",
+    "bugs": [
+      {
+        "id": "prober/timeout-units",
+        "path": "internal/health/prober.go",
+        "anchor": "timeout := time.Duration(p.cfg.TimeoutMs) * time.Second",
+        "tolerance": 2,
+        "summary": "TimeoutMs is milliseconds but is now multiplied by time.Second, making every timeout 1000 times too long.",
+        "keywords": ["second", "millisecond", "unit", "1000", "1,000", "thousand"]
+      },
+      {
+        "id": "prober/map-race",
+        "path": "internal/health/prober.go",
+        "anchor": "results[ep] = p.probe(ctx, ep)",
+        "summary": "Goroutines write the results map concurrently without a lock: a data race that can crash with a concurrent map write.",
+        "keywords": ["race", "concurrent", "mutex", "synchroniz", "lock", "fatal", "thread-safe", "thread safe", "not safe"]
+      }
+    ]
+  },
+  {
+    "id": "sync-users",
+    "description": "Parallelizes a user sync and adds a top-scores helper (TypeScript).",
+    "bugs": [
+      {
+        "id": "sync-users/foreach-async",
+        "path": "src/sync/syncUsers.ts",
+        "anchor": "users.forEach(async (user) => {",
+        "summary": "forEach ignores the async callbacks' promises, so syncUsers records the sync and returns before any upsert finishes, with counts of zero.",
+        "keywords": ["foreach", "not awaited", "await", "promise.all", "fire-and-forget", "fire and forget", "before", "resolve", "unhandled", "does not wait", "doesn't wait"]
+      },
+      {
+        "id": "sync-users/lexicographic-sort",
+        "path": "src/sync/syncUsers.ts",
+        "anchor": "return scores.sort().reverse().slice(0, n);",
+        "summary": "sort() without a comparator orders numbers as strings (10 before 9), and it sorts the caller's array in place.",
+        "keywords": ["lexicograph", "string", "comparator", "numeric", "a - b", "b - a", "mutat", "in place", "in-place", "alphabetic", "unicode", "compare function"]
+      }
+    ]
+  },
+  {
+    "id": "sessions",
+    "description": "Adds in-place pruning and pagination of sessions (Python).",
+    "bugs": [
+      {
+        "id": "sessions/remove-while-iterating",
+        "path": "app/sessions.py",
+        "anchor": "sessions.remove(s)",
+        "tolerance": 3,
+        "summary": "Removing from the list while iterating it skips the element after each removal, so consecutive expired sessions survive.",
+        "keywords": ["skip", "while iterating", "during iteration", "modif", "mutat", "iterat", "adjacent", "consecutive", "copy", "next element"]
+      },
+      {
+        "id": "sessions/page-count",
+        "path": "app/sessions.py",
+        "anchor": "total_pages = len(sessions) // per_page",
+        "tolerance": 2,
+        "summary": "Floor division drops the last partial page: 11 sessions at 10 per page report one page.",
+        "keywords": ["ceil", "round", "partial", "last page", "floor", "remainder", "off-by-one", "off by one", "truncat", "incomplete page", "final page"]
+      }
+    ]
+  },
+  {
+    "id": "clean-retry",
+    "description": "A correct retry loop for an idempotent PUT. Control case: any medium or high finding is a false positive.",
+    "bugs": []
+  }
+]
