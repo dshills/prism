@@ -25,6 +25,7 @@ type OpenAI struct {
 	client  *http.Client
 	schema  schemaSupport
 	effort  effortSupport
+	outCap  outputCap
 }
 
 // NewOpenAI creates a new OpenAI provider.
@@ -55,8 +56,10 @@ func (o *OpenAI) Name() string {
 func (o *OpenAI) Review(ctx context.Context, req ReviewRequest) (ReviewResponse, error) {
 	// An endpoint without response_format, or a model that does not reason,
 	// refuses the field and is asked again without it.
-	return sendOptional(req, &o.schema, &o.effort, func(structured, withEffort bool) (ReviewResponse, error) {
-		return o.review(ctx, req, structured, withEffort)
+	return sendCapped(req, &o.outCap, func(req ReviewRequest) (ReviewResponse, error) {
+		return sendOptional(req, &o.schema, &o.effort, func(structured, withEffort bool) (ReviewResponse, error) {
+			return o.review(ctx, req, structured, withEffort)
+		})
 	})
 }
 

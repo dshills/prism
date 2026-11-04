@@ -22,6 +22,7 @@ type Ollama struct {
 	client  *http.Client
 	schema  schemaSupport
 	effort  effortSupport
+	outCap  outputCap
 }
 
 // NewOllama creates a new Ollama provider. No API key is required by default.
@@ -52,8 +53,10 @@ func (o *Ollama) Name() string { return "ollama" }
 func (o *Ollama) Review(ctx context.Context, req ReviewRequest) (ReviewResponse, error) {
 	// A server without response_format or reasoning_effort refuses the
 	// field and is asked again without it.
-	return sendOptional(req, &o.schema, &o.effort, func(structured, withEffort bool) (ReviewResponse, error) {
-		return o.review(ctx, req, structured, withEffort)
+	return sendCapped(req, &o.outCap, func(req ReviewRequest) (ReviewResponse, error) {
+		return sendOptional(req, &o.schema, &o.effort, func(structured, withEffort bool) (ReviewResponse, error) {
+			return o.review(ctx, req, structured, withEffort)
+		})
 	})
 }
 

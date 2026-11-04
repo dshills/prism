@@ -23,6 +23,7 @@ type Anthropic struct {
 	client *http.Client
 	schema schemaSupport
 	effort effortSupport
+	outCap outputCap
 }
 
 // NewAnthropic creates a new Anthropic provider.
@@ -43,8 +44,10 @@ func (a *Anthropic) Name() string { return "anthropic" }
 func (a *Anthropic) Review(ctx context.Context, req ReviewRequest) (ReviewResponse, error) {
 	// A model without structured outputs or effort refuses them, and is
 	// asked again without.
-	return sendOptional(req, &a.schema, &a.effort, func(structured, withEffort bool) (ReviewResponse, error) {
-		return a.review(ctx, req, structured, withEffort)
+	return sendCapped(req, &a.outCap, func(req ReviewRequest) (ReviewResponse, error) {
+		return sendOptional(req, &a.schema, &a.effort, func(structured, withEffort bool) (ReviewResponse, error) {
+			return a.review(ctx, req, structured, withEffort)
+		})
 	})
 }
 

@@ -20,6 +20,7 @@ type Gemini struct {
 	client *http.Client
 	schema schemaSupport
 	effort effortSupport
+	outCap outputCap
 }
 
 // NewGemini creates a new Gemini provider.
@@ -43,8 +44,10 @@ func (g *Gemini) Name() string { return "gemini" }
 func (g *Gemini) Review(ctx context.Context, req ReviewRequest) (ReviewResponse, error) {
 	// A model without a response schema or a thinking level refuses the
 	// field and is asked again without it.
-	return sendOptional(req, &g.schema, &g.effort, func(structured, withEffort bool) (ReviewResponse, error) {
-		return g.review(ctx, req, structured, withEffort)
+	return sendCapped(req, &g.outCap, func(req ReviewRequest) (ReviewResponse, error) {
+		return sendOptional(req, &g.schema, &g.effort, func(structured, withEffort bool) (ReviewResponse, error) {
+			return g.review(ctx, req, structured, withEffort)
+		})
 	})
 }
 

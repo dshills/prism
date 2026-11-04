@@ -129,11 +129,20 @@ func (s *effortSupport) use(effort string) bool {
 // sent to this endpoint again, so the other chunks of a review do not each
 // pay for a refused request first; a field is switched off only after every
 // attempt that kept it was refused.
+//
+// A refused output limit is returned as it is, for sendCapped to ask again
+// within the model's cap, so a provider calls sendOptional inside
+// sendCapped.
 func sendOptional(req ReviewRequest, schema *schemaSupport, effort *effortSupport,
 	send func(structured, withEffort bool) (ReviewResponse, error)) (ReviewResponse, error) {
 	structured, withEffort := schema.use(req.Output), effort.use(req.Effort)
 	resp, err := send(structured, withEffort)
 	if !refusedSchema(err) {
+		return resp, err
+	}
+	// A refused output limit is not the schema's or the effort's fault:
+	// sendCapped asks again within the limit the model named.
+	if _, ok := refusedOutputLimit(err, req.MaxTokens); ok {
 		return resp, err
 	}
 	type attempt struct{ structured, effort bool }
@@ -157,6 +166,9 @@ func sendOptional(req ReviewRequest, schema *schemaSupport, effort *effortSuppor
 		}
 		if !refusedSchema(err) {
 			return resp, err
+		}
+		if _, ok := refusedOutputLimit(err, req.MaxTokens); ok {
+			return resp, err // as above: for sendCapped, not a field to drop
 		}
 	}
 	return resp, err

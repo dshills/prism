@@ -91,7 +91,9 @@ func (r *partReviewer) review(ctx context.Context, p part, depth int) (partResul
 	again, err := r.ask(ctx, p, 2*defaultMaxTokens)
 	res.add(again)
 	if providers.IsTruncated(err) {
-		return res, fmt.Errorf("response cut off even at %d output tokens, and the part cannot be split further: %w", 2*defaultMaxTokens, err)
+		// err names the limit actually used, which a model's own output cap
+		// can hold below 2*defaultMaxTokens.
+		return res, fmt.Errorf("response cut off again, and the part cannot be split further: %w", err)
 	}
 	return res, err
 }
