@@ -207,45 +207,86 @@ func locateEvidence(lines []indexedLine, evidence string, statedStart int) (star
 // index of its first line and its length.
 func locateEvidenceRun(lines []indexedLine, evidence string, statedStart int) (i, n int, found bool) {
 	ev := evidenceLines(evidence, false)
-	matches := findRuns(lines, ev)
+	matches := findRunsInViews(lines, ev)
 	if len(matches) == 0 {
 		// A model may copy the diff's own '+' / '-' markers into the quote.
 		if stripped := evidenceLines(evidence, true); !slices.Equal(stripped, ev) {
-			ev = stripped
-			matches = findRuns(lines, ev)
+			matches = findRunsInViews(lines, stripped)
 		}
 	}
 	if len(matches) == 0 {
 		return 0, 0, false
 	}
-	best, bestDist := 0, math.MaxInt
+	best, bestDist := matches[0], math.MaxInt
 	for _, m := range matches {
-		s, _ := runRange(lines[m : m+len(ev)])
+		s, _ := runRange(lines[m.i : m.i+m.n])
 		d := bestDistance(s, statedStart)
 		if d < bestDist {
 			best, bestDist = m, d
 		}
 	}
-	return best, len(ev), true
+	return best.i, best.n, true
 }
 
-func findRuns(lines []indexedLine, ev []string) []int {
+// evidenceRun is a match of quoted evidence: lines[i:i+n]. The span can be
+// longer than the quote, since it includes the lines of the other side of
+// the diff interleaved with the ones quoted.
+type evidenceRun struct{ i, n int }
+
+// evidenceViews are the ways a quote can read a hunk, in the order they are
+// tried: as the diff shows it, as the new file (its removed lines left out)
+// and as the old file (its added lines left out). A model quoting code
+// across an edit quotes one side of it, which the diff interleaves with the
+// other: a loop rewritten line by line reads "-old", "+new", "-old", ...
+var evidenceViews = []func(diffutil.Line) bool{
+	func(diffutil.Line) bool { return false },
+	func(l diffutil.Line) bool { return l.Removed },
+	func(l diffutil.Line) bool { return l.Added },
+}
+
+// findRunsInViews is the matches of ev in every view of lines, each once,
+// in view order, so that the nearest match wins whichever view has it and a
+// tie goes to the diff as shown.
+func findRunsInViews(lines []indexedLine, ev []string) []evidenceRun {
+	var out []evidenceRun
+	for _, skip := range evidenceViews {
+		for _, r := range findRuns(lines, ev, skip) {
+			if !slices.Contains(out, r) {
+				out = append(out, r)
+			}
+		}
+	}
+	return out
+}
+
+// findRuns is every match of ev in lines as a contiguous run of the lines
+// skip leaves in.
+func findRuns(lines []indexedLine, ev []string, skip func(diffutil.Line) bool) []evidenceRun {
 	if len(ev) == 0 {
 		return nil
 	}
-	var out []int
-	for i := 0; i+len(ev) <= len(lines); i++ {
+	var view []int // indexes into lines
+	for k, l := range lines {
+		if !skip(l.line) {
+			view = append(view, k)
+		}
+	}
+	var out []evidenceRun
+	for i := 0; i+len(ev) <= len(view); i++ {
+		first := lines[view[i]]
 		match := true
 		for j := range ev {
 			// A quote lies within one hunk: the lines between two hunks are
 			// not in the diff, so a run across them is not contiguous code.
-			if lines[i+j].norm != ev[j] || lines[i+j].line.Hunk != lines[i].line.Hunk {
+			l := lines[view[i+j]]
+			if l.norm != ev[j] || l.line.Hunk != first.line.Hunk {
 				match = false
 				break
 			}
 		}
 		if match {
-			out = append(out, i)
+			last := view[i+len(ev)-1]
+			out = append(out, evidenceRun{i: view[i], n: last - view[i] + 1})
 		}
 	}
 	return out

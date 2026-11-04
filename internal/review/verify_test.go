@@ -136,6 +136,52 @@ func TestVerifyEvidence_NearestMatch(t *testing.T) {
 	}
 }
 
+// A quote of code across an edit is one side of it, which the diff
+// interleaves with the other: the new loop's lines are found though the old
+// loop's lines sit between them, and so are the old loop's.
+func TestVerifyEvidence_AcrossEdit(t *testing.T) {
+	diff := "diff --git a/s.ts b/s.ts\n--- a/s.ts\n+++ b/s.ts\n@@ -10,8 +10,8 @@ export async function sync() {\n" +
+		"   const result = { updated: 0 };\n" +
+		"-  for (const user of users) {\n" +
+		"+  users.forEach(async (user) => {\n" +
+		"     await store.upsert(user);\n" +
+		"     result.updated++;\n" +
+		"-  }\n" +
+		"+  });\n" +
+		"   await store.setLastSync(new Date());\n" +
+		"   return result;\n"
+	newSide := "  users.forEach(async (user) => {\n    await store.upsert(user);\n    result.updated++;\n  });\n  await store.setLastSync(new Date());"
+	oldSide := "  for (const user of users) {\n    await store.upsert(user);\n    result.updated++;\n  }\n  await store.setLastSync(new Date());"
+	for _, c := range []struct{ name, ev string }{{"new side", newSide}, {"old side", oldSide}} {
+		kept, discarded := verifyEvidence([]Finding{finding("s.ts", 40, c.ev)}, diff) // a wrong line, corrected
+		if len(discarded) != 0 {
+			t.Errorf("%s: discarded: %s", c.name, discarded[0].Reason)
+			continue
+		}
+		if len(kept) != 1 || len(kept[0].Locations) != 1 {
+			t.Fatalf("%s: kept %+v", c.name, kept)
+		}
+		if lr := kept[0].Locations[0].Lines; lr.Start != 11 || lr.End != 15 {
+			t.Errorf("%s: lines = %d-%d, want 11-15", c.name, lr.Start, lr.End)
+		}
+	}
+	// A quote found in the diff as shown and, nearer the stated line, only in
+	// the new side: the nearer one wins.
+	near := "diff --git a/n.go b/n.go\n--- a/n.go\n+++ b/n.go\n@@ -1,13 +1,12 @@\n" +
+		" a()\n b()\n" + strings.Repeat(" pad()\n", 8) +
+		" a()\n-old()\n b()\n"
+	kept, _ := verifyEvidence([]Finding{finding("n.go", 14, "a()\nb()")}, near)
+	if len(kept) != 1 || kept[0].Locations[0].Lines.Start != 11 {
+		t.Errorf("nearest match: %+v, want the new-side run at line 11", kept)
+	}
+
+	// A quote mixing both sides is still not code that exists.
+	mixed := "  for (const user of users) {\n  users.forEach(async (user) => {\n  });\n  }"
+	if _, discarded := verifyEvidence([]Finding{finding("s.ts", 11, mixed)}, diff); len(discarded) != 1 {
+		t.Error("a quote interleaving the sides out of order was kept")
+	}
+}
+
 // Correcting a finding's lines must not alias the caller's Locations slice.
 func TestVerifyEvidence_DoesNotMutateInput(t *testing.T) {
 	in := []Finding{finding("x/x.go", 1, "for i := 0; i <= len(xs); i++ {")}

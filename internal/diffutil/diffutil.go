@@ -70,6 +70,8 @@ type Line struct {
 	NewLine int
 	// Removed is true for a '-' line.
 	Removed bool
+	// Added is true for a '+' line; a context line is neither.
+	Added bool
 	// Hunk is the 1-based index of the hunk the line belongs to.
 	Hunk int
 	// Heading is the text git puts after its hunk's header,
@@ -101,7 +103,7 @@ func PostImageLines(section string) []Line {
 		}
 		switch raw[0] {
 		case '+', ' ':
-			out = append(out, Line{Text: raw[1:], NewLine: newLine, Hunk: hunk, Heading: heading})
+			out = append(out, Line{Text: raw[1:], NewLine: newLine, Added: raw[0] == '+', Hunk: hunk, Heading: heading})
 			newLine++
 		case '-':
 			out = append(out, Line{Text: raw[1:], Removed: true, Hunk: hunk, Heading: heading})

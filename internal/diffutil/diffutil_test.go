@@ -65,10 +65,10 @@ func TestPostImageLines_MultiHunk(t *testing.T) {
 	want := []Line{
 		{Text: "package x", NewLine: 1, Hunk: 1},
 		{Text: "old()", Removed: true, Hunk: 1},
-		{Text: "new()", NewLine: 2, Hunk: 1},
+		{Text: "new()", NewLine: 2, Added: true, Hunk: 1},
 		{Text: "end()", NewLine: 3, Hunk: 1},
 		{Text: "a := 1", NewLine: 40, Hunk: 2, Heading: "func later() {"},
-		{Text: "b := 2", NewLine: 41, Hunk: 2, Heading: "func later() {"},
+		{Text: "b := 2", NewLine: 41, Added: true, Hunk: 2, Heading: "func later() {"},
 	}
 	if len(got) != len(want) {
 		t.Fatalf("got %d lines %+v, want %d", len(got), got, len(want))
