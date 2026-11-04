@@ -159,7 +159,8 @@ func Commit(ctx context.Context, sha string, parent string, opts DiffOptions) (D
 	diff, widened, err := gitDiff(ctx, []string{"diff", sha + "~1", sha}, opts)
 	if err != nil {
 		widened = 0
-		// Might be initial commit, try show
+		// Might be initial commit, try show. Every line of a first commit is
+		// added, so the context-lines setting has nothing to change here.
 		diff, err = gitOutputCtx(ctx, "show", "--format=", sha, "--")
 		if err != nil {
 			return DiffResult{}, fmt.Errorf("git show %s: %w", sha, err)
