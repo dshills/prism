@@ -61,7 +61,7 @@ Every review path ends in `review.FinalizeFindings`: verify findings, drop those
 
 Config file location: `$XDG_CONFIG_HOME/prism/config.json`
 
-Environment variables: `PRISM_PROVIDER`, `PRISM_MODEL`, `PRISM_FAIL_ON`, `PRISM_FORMAT`, `PRISM_MAX_FINDINGS`, `PRISM_CONTEXT_LINES`. Provider keys: `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY`, `WAFER_API_KEY` (with `WAFER_API_URL`).
+Environment variables: `PRISM_PROVIDER`, `PRISM_MODEL`, `PRISM_REASONING_EFFORT`, `PRISM_FAIL_ON`, `PRISM_FORMAT`, `PRISM_MAX_FINDINGS`, `PRISM_CONTEXT_LINES`. Provider keys: `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY`, `WAFER_API_KEY` (with `WAFER_API_URL`).
 
 ## Code Quality — REQUIRED
 
