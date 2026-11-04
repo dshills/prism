@@ -7,9 +7,10 @@ import (
 	"fmt"
 	"maps"
 	"os"
-	"path/filepath"
 	"slices"
 	"strings"
+
+	"github.com/dshills/prism/internal/pathglob"
 )
 
 // Rules represents a rules pack loaded from --rules.
@@ -77,7 +78,7 @@ func LoadRules(path string) (*Rules, error) {
 			return nil, fmt.Errorf("rules file: set %d has sets of its own; rule sets do not nest", i)
 		}
 		for _, p := range set.Paths {
-			if err := checkGlob(p); err != nil {
+			if err := pathglob.Check(p); err != nil {
 				return nil, fmt.Errorf("rules file: set %d: %w", i, err)
 			}
 		}
@@ -165,7 +166,7 @@ func (r *Rules) appliesTo(path string) bool {
 		return true
 	}
 	for _, p := range r.Paths {
-		if matchGlob(p, path) {
+		if pathglob.Match(p, path) {
 			return true
 		}
 	}
@@ -219,53 +220,4 @@ func ApplySeverityOverrides(findings []Finding, rules *Rules) []Finding {
 		}
 	}
 	return findings
-}
-
-// matchGlob reports whether path matches pattern, segment by segment: "**"
-// matches any number of directories, and other segments match as
-// filepath.Match does. A pattern without a slash matches the file name, in
-// any directory.
-func matchGlob(pattern, path string) bool {
-	if !strings.Contains(pattern, "/") {
-		ok, _ := filepath.Match(pattern, filepath.Base(path))
-		return ok
-	}
-	return matchSegments(strings.Split(pattern, "/"), strings.Split(path, "/"))
-}
-
-// matchSegments matches path segments against pattern segments, bottom up:
-// m[i][j] is whether pat[i:] matches segs[j:]. Each pair is computed once,
-// so a pattern with many "**" stays linear in pattern times path length.
-func matchSegments(pat, segs []string) bool {
-	m := make([][]bool, len(pat)+1)
-	for i := range m {
-		m[i] = make([]bool, len(segs)+1)
-	}
-	m[len(pat)][len(segs)] = true
-	for i := len(pat) - 1; i >= 0; i-- {
-		for j := len(segs); j >= 0; j-- {
-			switch {
-			case pat[i] == "**":
-				// Match no segment here, or this one and keep going.
-				m[i][j] = m[i+1][j] || (j < len(segs) && m[i][j+1])
-			case j < len(segs):
-				ok, _ := filepath.Match(pat[i], segs[j])
-				m[i][j] = ok && m[i+1][j+1]
-			}
-		}
-	}
-	return m[0][0]
-}
-
-// checkGlob rejects a pattern filepath.Match cannot parse.
-func checkGlob(pattern string) error {
-	if strings.TrimSpace(pattern) == "" {
-		return errors.New("empty path glob")
-	}
-	for _, seg := range strings.Split(pattern, "/") {
-		if _, err := filepath.Match(seg, ""); err != nil {
-			return fmt.Errorf("bad path glob %q: %w", pattern, err)
-		}
-	}
-	return nil
 }

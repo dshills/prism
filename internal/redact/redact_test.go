@@ -61,7 +61,7 @@ func TestSecrets_NoFalsePositives(t *testing.T) {
 }
 
 func TestShouldRedactPath(t *testing.T) {
-	patterns := []string{"**/.env", "**/*secrets*"}
+	patterns := []string{"**/.env", "**/*secrets*", "deploy/keys/**"}
 
 	tests := []struct {
 		path string
@@ -71,6 +71,9 @@ func TestShouldRedactPath(t *testing.T) {
 		{"config/.env", true},
 		{"secrets.yaml", true},
 		{"my-secrets-file.json", true},
+		{"config/secrets/db.yaml", true}, // inside a directory the pattern matches
+		{"deploy/keys/prod/signing.pem", true},
+		{"deploy/keys.md", false},
 		{"main.go", false},
 		{"config/app.json", false},
 	}

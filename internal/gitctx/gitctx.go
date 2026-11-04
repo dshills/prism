@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/dshills/prism/internal/diffutil"
+	"github.com/dshills/prism/internal/pathglob"
 )
 
 // DiffOptions controls how diffs are gathered.
@@ -146,7 +147,6 @@ func Staged(ctx context.Context, opts DiffOptions) (DiffResult, error) {
 
 // Commit returns the diff for a specific commit vs its parent.
 func Commit(ctx context.Context, sha string, parent string, opts DiffOptions) (DiffResult, error) {
-	args := buildDiffArgs(opts)
 	if parent != "" {
 		diff, widened, err := gitDiff(ctx, []string{"diff", parent, sha}, opts)
 		if err != nil {
@@ -160,8 +160,7 @@ func Commit(ctx context.Context, sha string, parent string, opts DiffOptions) (D
 	if err != nil {
 		widened = 0
 		// Might be initial commit, try show
-		showArgs := append([]string{"show", "--format=", sha, "--"}, args[1:]...) // skip -U flag reuse
-		diff, err = gitOutputCtx(ctx, showArgs...)
+		diff, err = gitOutputCtx(ctx, "show", "--format=", sha, "--")
 		if err != nil {
 			return DiffResult{}, fmt.Errorf("git show %s: %w", sha, err)
 		}
@@ -242,20 +241,16 @@ func Snippet(content, path, lang, base string) (DiffResult, error) {
 	}, nil
 }
 
+// buildDiffArgs are the arguments every diff mode passes git. The include
+// patterns are not among them: git's pathspecs read "**" differently from
+// prism's globs (a "**/*.go" pathspec leaves out the files at the root), so
+// the diff is filtered afterwards instead (selectPaths).
 func buildDiffArgs(opts DiffOptions) []string {
 	var args []string
 	if opts.ContextLines > 0 {
 		args = append(args, fmt.Sprintf("-U%d", opts.ContextLines))
 	}
-	args = append(args, "--")
-	if len(opts.Include) > 0 {
-		for _, p := range opts.Include {
-			if p != "**/*" {
-				args = append(args, p)
-			}
-		}
-	}
-	return args
+	return append(args, "--")
 }
 
 func buildResult(ctx context.Context, diff, mode, rangeStr string, opts DiffOptions) (DiffResult, error) {
@@ -264,13 +259,10 @@ func buildResult(ctx context.Context, diff, mode, rangeStr string, opts DiffOpti
 		meta = RepoMeta{}
 	}
 
+	// Filter before truncating, so left-out files don't use the byte budget.
+	diff = selectPaths(diff, opts)
 	files := extractFiles(diff)
 
-	// Filter excludes before truncating so excluded files don't consume the byte budget
-	if len(opts.Exclude) > 0 {
-		diff = filterExcluded(diff, opts.Exclude)
-		files = filterFileList(files, opts.Exclude)
-	}
 	var excluded []Excluded
 	if !opts.NoAutoExclude {
 		diff, excluded = autoExclude(diff, headsFor(ctx, meta.Root, mode, rangeStr))
@@ -327,45 +319,39 @@ func extractFiles(diff string) []string {
 	return files
 }
 
-func filterExcluded(diff string, excludes []string) string {
-	sections := diffutil.SplitSections(diff)
+// selectPaths keeps the diff's sections for files the include patterns
+// match (all files when there are none) and the exclude patterns do not. A
+// section whose path cannot be read is kept.
+func selectPaths(diff string, opts DiffOptions) string {
+	if len(opts.Include) == 0 && len(opts.Exclude) == 0 {
+		return diff
+	}
 	var kept []string
-	for _, section := range sections {
+	for _, section := range diffutil.SplitSections(diff) {
 		path := diffutil.PathFromSection(section)
-		if path == "" || !MatchesAny(path, excludes) {
+		if path == "" || pathSelected(path, opts) {
 			kept = append(kept, section)
 		}
 	}
 	return strings.Join(kept, "")
 }
 
-func filterFileList(files []string, excludes []string) []string {
-	var result []string
-	for _, f := range files {
-		if !MatchesAny(f, excludes) {
-			result = append(result, f)
-		}
+// pathSelected reports whether the include and exclude patterns keep path.
+func pathSelected(path string, opts DiffOptions) bool {
+	if len(opts.Include) > 0 && !MatchesAny(path, opts.Include) {
+		return false
 	}
-	return result
+	return !MatchesAny(path, opts.Exclude)
 }
 
-// MatchesAny returns true if the path matches any of the given glob patterns.
+// MatchesAny reports whether path matches any of the glob patterns
+// (pathglob.MatchOrUnder): "**" matches any number of directories, a
+// pattern without a slash matches the file name, and a pattern naming a
+// directory matches everything in it.
 func MatchesAny(path string, patterns []string) bool {
 	for _, pattern := range patterns {
-		matched, err := filepath.Match(pattern, path)
-		if err == nil && matched {
+		if pathglob.MatchOrUnder(pattern, path) {
 			return true
-		}
-		clean := strings.TrimPrefix(pattern, "**/")
-		if clean != pattern {
-			matched, err = filepath.Match(clean, filepath.Base(path))
-			if err == nil && matched {
-				return true
-			}
-			matched, err = filepath.Match(clean, path)
-			if err == nil && matched {
-				return true
-			}
 		}
 	}
 	return false
@@ -389,17 +375,8 @@ func WalkFiles(opts DiffOptions) ([]string, error) {
 		if line == "" {
 			continue
 		}
-		// Apply include filter
-		if len(opts.Include) > 0 {
-			if !MatchesAny(line, opts.Include) {
-				continue
-			}
-		}
-		// Apply exclude filter
-		if len(opts.Exclude) > 0 {
-			if MatchesAny(line, opts.Exclude) {
-				continue
-			}
+		if !pathSelected(line, opts) {
+			continue
 		}
 		// Skip binary files
 		if isBinary(line) {

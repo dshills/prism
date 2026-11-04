@@ -2,6 +2,7 @@ package gitctx
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -43,24 +44,40 @@ func TestExtractFiles_Dedup(t *testing.T) {
 	}
 }
 
-func TestFilterExcluded(t *testing.T) {
-	diff := `diff --git a/main.go b/main.go
---- a/main.go
-+++ b/main.go
-@@ -1,3 +1,4 @@
-+import "fmt"
-diff --git a/vendor/lib.go b/vendor/lib.go
---- a/vendor/lib.go
-+++ b/vendor/lib.go
-@@ -1,3 +1,4 @@
-+package lib
-`
-	result := filterExcluded(diff, []string{"vendor/**"})
-	if strings.Contains(result, "vendor/lib.go") {
-		t.Error("vendor/lib.go should be excluded")
+// diffOf is a diff touching each of paths.
+func diffOf(paths ...string) string {
+	var b strings.Builder
+	for _, p := range paths {
+		fmt.Fprintf(&b, "diff --git a/%s b/%s\n--- a/%s\n+++ b/%s\n@@ -1,3 +1,4 @@\n+x\n", p, p, p, p)
 	}
-	if !strings.Contains(result, "main.go") {
-		t.Error("main.go should be kept")
+	return b.String()
+}
+
+func TestSelectPaths(t *testing.T) {
+	all := []string{"main.go", "pkg/a.go", "pkg/deep/b.go", "vendor/github.com/x/y.go", "web/dist/js/app.js", "docs/guide.md"}
+	for _, c := range []struct {
+		name             string
+		include, exclude []string
+		want             []string
+	}{
+		{"defaults", []string{"**/*"}, []string{"vendor/**", "**/*.gen.go", "**/dist/**"},
+			[]string{"main.go", "pkg/a.go", "pkg/deep/b.go", "docs/guide.md"}},
+		// git's own "**/*.go" pathspec left out root files.
+		{"include with globstar keeps root files", []string{"**/*.go"}, nil,
+			[]string{"main.go", "pkg/a.go", "pkg/deep/b.go", "vendor/github.com/x/y.go"}},
+		{"include a directory", []string{"pkg"}, nil, []string{"pkg/a.go", "pkg/deep/b.go"}},
+		{"exclude a nested tree", nil, []string{"pkg/**"},
+			[]string{"main.go", "vendor/github.com/x/y.go", "web/dist/js/app.js", "docs/guide.md"}},
+		{"exclude by file name", nil, []string{"*.md", "*.js"},
+			[]string{"main.go", "pkg/a.go", "pkg/deep/b.go", "vendor/github.com/x/y.go"}},
+		{"no patterns", nil, nil, all},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			got := extractFiles(selectPaths(diffOf(all...), DiffOptions{Include: c.include, Exclude: c.exclude}))
+			if strings.Join(got, ",") != strings.Join(c.want, ",") {
+				t.Errorf("kept %v, want %v", got, c.want)
+			}
+		})
 	}
 }
 
@@ -71,11 +88,20 @@ func TestMatchesAny(t *testing.T) {
 		want     bool
 	}{
 		{"vendor/lib.go", []string{"vendor/**"}, true},
+		{"vendor/github.com/x/y/z.go", []string{"vendor/**"}, true},
 		{"main.go", []string{"vendor/**"}, false},
 		{"foo.gen.go", []string{"**/*.gen.go"}, true},
 		{"pkg/foo.gen.go", []string{"**/*.gen.go"}, true},
 		{"dist/bundle.js", []string{"**/dist/**"}, true},
+		{"web/dist/js/app.js", []string{"**/dist/**"}, true},
+		{"internal/review/testdata/wafereval/x/after/y.ts", []string{"internal/review/testdata/**"}, true},
+		{"internal/review/engine.go", []string{"internal/review/testdata/**"}, false},
+		{"internal/review/engine.go", []string{"internal/review"}, true},
+		{"internal/reviewer/x.go", []string{"internal/review"}, false},
 		{"main.go", []string{"*.go"}, true},
+		{"cmd/prism/main.go", []string{"*.go"}, true},
+		{"README.md", []string{"*.go"}, false},
+		{"main.go", nil, false},
 	}
 	for _, tt := range tests {
 		got := MatchesAny(tt.path, tt.patterns)
@@ -124,9 +150,9 @@ func TestBuildDiffArgs(t *testing.T) {
 	if !found {
 		t.Error("args should contain -- separator")
 	}
-	// Should contain the include pattern
-	if args[len(args)-1] != "*.go" {
-		t.Errorf("last arg = %q, want %q", args[len(args)-1], "*.go")
+	// Include patterns are not pathspecs: the diff is filtered afterwards.
+	if args[len(args)-1] != "--" {
+		t.Errorf("args = %v, want no pathspecs after --", args)
 	}
 }
 
@@ -155,27 +181,6 @@ func TestBuildDiffArgs_NoContextLines(t *testing.T) {
 		if strings.HasPrefix(a, "-U") {
 			t.Error("Should not have -U flag with ContextLines=0")
 		}
-	}
-}
-
-func TestFilterFileList(t *testing.T) {
-	files := []string{"main.go", "vendor/lib.go", "pkg/util.go", "dist/bundle.js"}
-	result := filterFileList(files, []string{"vendor/**", "**/dist/**"})
-	if len(result) != 2 {
-		t.Fatalf("filterFileList got %d files, want 2", len(result))
-	}
-	if result[0] != "main.go" {
-		t.Errorf("result[0] = %q, want %q", result[0], "main.go")
-	}
-	if result[1] != "pkg/util.go" {
-		t.Errorf("result[1] = %q, want %q", result[1], "pkg/util.go")
-	}
-}
-
-func TestFilterFileList_Empty(t *testing.T) {
-	result := filterFileList(nil, []string{"vendor/**"})
-	if len(result) != 0 {
-		t.Errorf("filterFileList nil input got %d, want 0", len(result))
 	}
 }
 
@@ -337,6 +342,56 @@ func setupTestRepo(t *testing.T) string {
 	run("git", "commit", "-m", "init")
 
 	return dir
+}
+
+// The path filters match nested files: "dir/**" covers every depth, and an
+// include of "**/*.go" keeps the files at the root, which git's pathspec of
+// the same text left out.
+func TestStaged_NestedGlobs(t *testing.T) {
+	dir := setupTestRepo(t)
+	for path, body := range map[string]string{
+		"main.go":                             "package main\n\nfunc main() { helper() }\n",
+		"pkg/deep/x.go":                       "package deep\n",
+		"vendor/github.com/x/y/z.go":          "package y\n",
+		"internal/review/testdata/a/b/c.ts":   "export const x = 1;\n",
+		"internal/review/testdata/a/notes.md": "# notes\n",
+	} {
+		full := filepath.Join(dir, filepath.FromSlash(path))
+		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(full, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if out, err := exec.Command("git", "-C", dir, "add", "-A").CombinedOutput(); err != nil {
+		t.Fatalf("git add: %v\n%s", err, out)
+	}
+	t.Chdir(dir)
+
+	for _, c := range []struct {
+		name             string
+		include, exclude []string
+		want             []string
+	}{
+		{"exclude nested trees", []string{"**/*"}, []string{"vendor/**", "internal/review/testdata/**"},
+			[]string{"main.go", "pkg/deep/x.go"}},
+		{"include globstar keeps root files", []string{"**/*.go"}, []string{"vendor/**"},
+			[]string{"main.go", "pkg/deep/x.go"}},
+		{"include a directory", []string{"internal/review"}, []string{"*.md"},
+			[]string{"internal/review/testdata/a/b/c.ts"}},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			r, err := Staged(t.Context(), DiffOptions{Include: c.include, Exclude: c.exclude, NoAutoExclude: true})
+			if err != nil {
+				t.Fatal(err)
+			}
+			// Files is read from the filtered diff, so it is what the review sees.
+			if strings.Join(r.Files, ",") != strings.Join(c.want, ",") {
+				t.Errorf("files = %v, want %v", r.Files, c.want)
+			}
+		})
+	}
 }
 
 func TestWalkFiles(t *testing.T) {

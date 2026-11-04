@@ -24,6 +24,9 @@ const (
 func gitDiff(ctx context.Context, prefix []string, opts DiffOptions) (string, int, error) {
 	args := buildDiffArgs(opts)
 	plain, err := gitOutputCtx(ctx, append(append([]string{}, prefix...), args...)...)
+	// Filtered here too (buildResult filters every diff), so the files left
+	// out are not widened or counted.
+	plain = selectPaths(plain, opts)
 	if err != nil || !opts.FunctionContext || plain == "" {
 		return plain, 0, err
 	}

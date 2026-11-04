@@ -5,35 +5,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/dshills/prism/internal/config"
 )
-
-func TestMatchGlob(t *testing.T) {
-	for _, c := range []struct {
-		pattern, path string
-		want          bool
-	}{
-		{"internal/auth/**", "internal/auth/token.go", true},
-		{"internal/auth/**", "internal/auth/oauth/flow.go", true},
-		{"internal/auth/**", "internal/authz/x.go", false},
-		{"**/*_test.go", "a_test.go", true},
-		{"**/*_test.go", "internal/review/x_test.go", true},
-		{"*_test.go", "deep/dir/y_test.go", true}, // no slash: the file name
-		{"*_test.go", "deep/dir/y.go", false},
-		{"cmd/*/main.go", "cmd/prism/main.go", true},
-		{"cmd/*/main.go", "cmd/a/b/main.go", false},
-		{"docs/**/*.md", "docs/x.md", true},
-		{"**", "any/path/at/all.go", true},
-		{"a/**/b/**/c.go", "a/x/b/y/z/c.go", true},
-		{"a/**/b/**/c.go", "a/x/y/c.go", false},
-	} {
-		if got := matchGlob(c.pattern, c.path); got != c.want {
-			t.Errorf("matchGlob(%q, %q) = %v, want %v", c.pattern, c.path, got, c.want)
-		}
-	}
-}
 
 func rulesFile(t *testing.T, body string) string {
 	t.Helper()
@@ -141,22 +115,6 @@ func TestRuleSets_InFingerprint(t *testing.T) {
 	}
 	if promptFingerprint(defaultPromptBuilder, cfg, &Rules{Focus: []string{"bugs"}}) != promptFingerprint(defaultPromptBuilder, cfg, &Rules{Focus: []string{"bugs"}, Sets: nil}) {
 		t.Error("fingerprint is not stable")
-	}
-}
-
-// Many "**" against a deep path that does not match still returns at once.
-func TestMatchGlob_ManyGlobstars(t *testing.T) {
-	pattern := strings.Repeat("**/", 30) + "missing.go"
-	path := strings.Repeat("d/", 60) + "found.go"
-	done := make(chan bool, 1)
-	go func() { done <- matchGlob(pattern, path) }()
-	select {
-	case got := <-done:
-		if got {
-			t.Error("matched a path without missing.go")
-		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("matchGlob backtracked for over 2s")
 	}
 }
 

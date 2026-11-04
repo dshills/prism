@@ -1,9 +1,9 @@
 package redact
 
 import (
-	"path/filepath"
 	"regexp"
-	"strings"
+
+	"github.com/dshills/prism/internal/pathglob"
 )
 
 const placeholder = "[REDACTED]"
@@ -52,21 +52,13 @@ func Secrets(text string) string {
 	return combinedSecretPattern.ReplaceAllString(text, placeholder)
 }
 
-// ShouldRedactPath checks if a file path matches any of the redaction path patterns.
+// ShouldRedactPath checks if a file path matches any of the redaction path
+// patterns, as the include and exclude filters match (pathglob.MatchOrUnder):
+// "secrets/**" and "secrets/" cover every file beneath secrets/.
 func ShouldRedactPath(path string, patterns []string) bool {
 	for _, pattern := range patterns {
-		matched, err := filepath.Match(pattern, path)
-		if err == nil && matched {
+		if pathglob.MatchOrUnder(pattern, path) {
 			return true
-		}
-		// Also try matching just the filename for patterns like "**/.env"
-		cleanPattern := strings.TrimPrefix(pattern, "**/")
-		if cleanPattern != pattern {
-			base := filepath.Base(path)
-			matched, err = filepath.Match(cleanPattern, base)
-			if err == nil && matched {
-				return true
-			}
 		}
 	}
 	return false

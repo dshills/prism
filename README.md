@@ -207,7 +207,7 @@ All review subcommands accept these flags:
 | `--context-lines` | Context lines in diff | `3` |
 | `--max-diff-bytes` | Maximum diff size in bytes | `500000` |
 | `--chunk-bytes` | Target size of each review chunk a larger diff is split into | `24000` |
-| `--paths` | Include file path globs (comma-separated) | `**/*` |
+| `--paths` | Include file path globs (comma-separated). In `--paths`, `--exclude` and `privacy.redactPaths` alike: `**` matches any number of directories, a pattern without a slash (`*.md`) matches the file name in any directory, a directory (`internal/review`, `vendor/`) matches everything in it, and a pattern with a slash is anchored at the repository root (`**/vendor/` for any depth) | `**/*` |
 | `--exclude` | Exclude file path globs (comma-separated) | `vendor/**`, `**/*.gen.go`, `**/dist/**` |
 | `--rules` | Rules file path | |
 | `--no-function-context` | Keep plain hunks instead of widening them to their enclosing functions | `false` |
